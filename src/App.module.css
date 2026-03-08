@@ -36,13 +36,35 @@
 }
 
 .title {
-  margin: 0 0 24px;
+  margin: 0 0 8px;
   font-size: 1.5rem;
   font-weight: 700;
   color: var(--text);
   border-bottom: 2px solid var(--accent);
   padding-bottom: 10px;
   width: 100%;
+}
+
+.syncBadge {
+  margin: 0 0 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0a6b0a;
+  background: #e8f5e9;
+  padding: 6px 12px;
+  border-radius: 8px;
+  display: inline-block;
+}
+
+.syncBadgeOff {
+  margin: 0 0 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #666;
+  background: #f5f5f5;
+  padding: 6px 12px;
+  border-radius: 8px;
+  display: inline-block;
 }
 
 .section {

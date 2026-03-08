@@ -1,0 +1,45 @@
+========================================
+Supabase SQL 에디터 사용법 (한번에 보기)
+========================================
+
+[1] Supabase 들어가기
+   - https://supabase.com 로그인
+   - 만든 프로젝트(예: bubupop-order) 클릭
+
+[2] SQL 에디터 열기
+   - 왼쪽 메뉴에서 "SQL Editor" 클릭
+     (코드 꺾쇠 </> 모양 아이콘)
+   - 오른쪽 "New query" 버튼 클릭
+
+[3] SQL 붙여넣기
+   - 아래 [SQL 전체] 를 드래그해서 복사
+   - SQL 에디터 큰 칸에 붙여넣기 (Ctrl+V)
+
+[4] 실행
+   - 오른쪽 아래 "Run" 버튼 클릭
+     (또는 키보드 Ctrl + Enter)
+   - 아래에 "Success. No rows returned" 나오면 완료
+
+========================================
+[SQL 전체] - 이 부분만 복사해서 붙여넣기
+========================================
+
+create table if not exists public.orders (
+  id text primary key,
+  date_key text not null,
+  order_data jsonb not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists orders_date_key_idx on public.orders (date_key);
+
+alter table public.orders enable row level security;
+
+create policy "Allow all for orders"
+  on public.orders for all
+  using (true)
+  with check (true);
+
+========================================
+끝
+========================================

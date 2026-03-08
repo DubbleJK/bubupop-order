@@ -1,4 +1,6 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { supabase, isSupabaseEnabled } from './lib/supabase'
+import { getDateKey, fetchOrdersForDate, insertOrder, deleteOrder, deleteAllForDate } from './lib/orderSync'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock, Measurements } from './types'
 import styles from './App.module.css'
 
@@ -87,6 +89,15 @@ function App() {
   const [listAddMessage, setListAddMessage] = useState(false)
   const [orderBlocks, setOrderBlocks] = useState<OrderBlock[]>([])
   const [editingPrependNextBlock, setEditingPrependNextBlock] = useState(false)
+
+  /** Supabase 사용 시 앱 로드 시 오늘 발주서 목록 불러오기 */
+  useEffect(() => {
+    if (!supabase) return
+    const dateKey = getDateKey()
+    fetchOrdersForDate(dateKey).then((list) => {
+      if (list.length > 0) setOrderList(list)
+    })
+  }, [])
 
   const goToOrderDetail = useCallback((type: OrderType) => {
     setOrderType(type)
@@ -285,36 +296,36 @@ function App() {
       .flatMap(b => b.tshirtItem?.designImages ?? [])
 
     if (orderBlocks.length === 0) return
-    setOrderList(prev => [
-      ...prev,
-      {
-        id: Date.now().toString(),
-        ordererName,
-        orderChannel,
-        deliveryLabel: deliveryLabel || '',
-        deliveryDate,
-        deliveryDateOther: deliveryDateOther || '',
-        orderProduct: productLabels,
-        fullText,
-        orderType: orderBlocks[0].orderType,
-        designImages: allDesignImages,
-        memo,
-        orderBlocks: orderBlocks.map(b => ({
-          ...b,
-          popItems: b.popItems ? [...b.popItems] : undefined,
-          stickerItems: b.stickerItems ? [...b.stickerItems] : undefined,
-          dtfItems: b.dtfItems ? [...b.dtfItems] : undefined,
-          cardBannerItems: b.cardBannerItems ? [...b.cardBannerItems] : undefined,
-          tshirtItem: b.tshirtItem
-            ? {
-                ...b.tshirtItem,
-                designImages: [...b.tshirtItem.designImages],
-                kidsSizes: [...b.tshirtItem.kidsSizes],
-              }
-            : undefined,
-        })),
-      },
-    ])
+    const newItem: OrderListItem = {
+      id: Date.now().toString(),
+      ordererName,
+      orderChannel,
+      deliveryLabel: deliveryLabel || '',
+      deliveryDate,
+      deliveryDateOther: deliveryDateOther || '',
+      orderProduct: productLabels,
+      fullText,
+      orderType: orderBlocks[0].orderType,
+      designImages: allDesignImages,
+      memo,
+      orderBlocks: orderBlocks.map(b => ({
+        ...b,
+        popItems: b.popItems ? [...b.popItems] : undefined,
+        stickerItems: b.stickerItems ? [...b.stickerItems] : undefined,
+        dtfItems: b.dtfItems ? [...b.dtfItems] : undefined,
+        cardBannerItems: b.cardBannerItems ? [...b.cardBannerItems] : undefined,
+        tshirtItem: b.tshirtItem
+          ? {
+              ...b.tshirtItem,
+              designImages: [...b.tshirtItem.designImages],
+              kidsSizes: [...b.tshirtItem.kidsSizes],
+            }
+          : undefined,
+      })),
+    }
+    setOrderList(prev => [...prev, newItem])
+    const dateKey = getDateKey()
+    insertOrder(dateKey, newItem)
     setListAddMessage(true)
     setTimeout(() => setListAddMessage(false), 2000)
     setOrderBlocks([])
@@ -343,6 +354,7 @@ function App() {
   ])
 
   const removeOrderFromList = useCallback((id: string) => {
+    deleteOrder(id)
     setOrderList(prev => prev.filter(item => item.id !== id))
   }, [])
 
@@ -358,6 +370,7 @@ function App() {
     setDeliveryDateOther(item.deliveryDateOther ?? '')
     setMemo(item.memo ?? '')
     setOrderBlocks(rest)
+    deleteOrder(item.id)
     setOrderList(prev => prev.filter(x => x.id !== item.id))
     setEditingPrependNextBlock(true)
 
@@ -422,6 +435,7 @@ function App() {
   }, [])
 
   const clearOrderList = useCallback(() => {
+    deleteAllForDate(getDateKey())
     setOrderList([])
   }, [])
 
@@ -465,6 +479,11 @@ function App() {
     return (
       <div className={styles.wrapper}>
         <h1 className={styles.title}>발주서 발행기</h1>
+        {isSupabaseEnabled() ? (
+          <p className={styles.syncBadge}>PC·폰 동기화 연결됨</p>
+        ) : (
+          <p className={styles.syncBadgeOff}>로컬만 (동기화 안 됨)</p>
+        )}
 
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>주문자 이름</h2>

@@ -1,0 +1,41 @@
+========================================
+PC·폰 동기화가 안 될 때 확인할 것
+========================================
+
+[1] 메인 화면 문구 확인
+   - 배포된 사이트(폰/PC)에서 "발주서 발행기" 제목 아래를 보세요.
+   - "PC·폰 동기화 연결됨" (초록색) → 설정은 된 상태. 아래 [3] 확인.
+   - "로컬만 (동기화 안 됨)" (회색) → 환경 변수가 안 들어간 상태. [2] 진행.
+
+[2] Vercel 환경 변수 넣기
+   1. Vercel 대시보드 → bubupop-order 프로젝트 클릭
+   2. 위쪽 메뉴에서 Settings 클릭
+   3. 왼쪽에서 Environment Variables 클릭
+   4. 다음 두 개 추가 (이름·값 정확히):
+
+      Name:  VITE_SUPABASE_URL
+      Value: (Supabase 대시보드 → Project Settings → API → Project URL 복사)
+
+      Name:  VITE_SUPABASE_ANON_KEY
+      Value: (같은 API 화면에서 anon public 키 복사)
+
+   5. 각각 Save 클릭
+
+[3] 꼭 Redeploy 하기 ★
+   - 환경 변수는 "다음 빌드"부터 적용됩니다.
+   - 변수를 넣은 뒤 반드시 한 번 더 배포해야 합니다.
+
+   방법 A: Vercel에서
+   - Deployments 탭 → 맨 위 배포 오른쪽 ⋮(점 세 개) → Redeploy
+
+   방법 B: 코드 푸시로
+   - 로컬에서 아무 수정이나 하고 git push 하면 자동 재배포
+
+   Redeploy가 끝난 뒤에 폰·PC에서 새로고침해서 다시 확인하세요.
+
+[4] Supabase 테이블 확인
+   - Supabase 대시보드 → SQL Editor
+   - "public.orders 테이블이 있는지" Table Editor에서 확인
+   - 없으면 Supabase_SQL에디터_사용법.txt 따라 테이블 생성
+
+========================================
