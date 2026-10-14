@@ -1,3 +1,4 @@
+import { LEDGER_PASSWORD_ROW_ID } from './ledgerPassword'
 import { orderWrittenAt } from './orderFormat'
 import { supabase } from './supabase'
 import type { OrderListItem } from '../types'
@@ -49,6 +50,7 @@ export async function fetchOrdersForDate(dateKey: string): Promise<OrderListItem
     .from(TABLE)
     .select('order_data, date_key')
     .eq('date_key', dateKey)
+    .neq('id', LEDGER_PASSWORD_ROW_ID)
     .order('created_at', { ascending: true })
   if (error) {
     console.warn('[orderSync] fetch error', error)
@@ -77,6 +79,7 @@ export async function fetchOpenOrders(): Promise<{ orders: OrderListItem[]; erro
     .from(TABLE)
     .select('order_data, date_key')
     .gte('date_key', daysAgoKey(180))
+    .neq('id', LEDGER_PASSWORD_ROW_ID)
     .order('date_key', { ascending: true })
     .order('created_at', { ascending: true })
   if (error) {
@@ -106,6 +109,7 @@ export async function fetchOrdersForMonth(monthKey: string): Promise<{ orders: O
     .select('order_data, date_key')
     .gte('date_key', start)
     .lt('date_key', end)
+    .neq('id', LEDGER_PASSWORD_ROW_ID)
     .order('date_key', { ascending: true })
     .order('created_at', { ascending: true })
   if (error) {
@@ -161,11 +165,22 @@ export async function updateOrder(item: OrderListItem): Promise<void> {
   if (error) console.warn('[orderSync] update error', error)
 }
 
-/** 발주서 한 건 삭제 */
-export async function deleteOrder(id: string): Promise<void> {
-  if (!supabase) return
+/** 서버에 발주서 표가 응답하는지 확인 */
+export async function pingOrders(): Promise<boolean> {
+  if (!supabase) return false
+  const { error } = await supabase.from(TABLE).select('id').limit(1)
+  return !error
+}
+
+/** 발주서 한 건 삭제. 서버 삭제가 실패하면 false */
+export async function deleteOrder(id: string): Promise<boolean> {
+  if (!supabase) return true
   const { error } = await supabase.from(TABLE).delete().eq('id', id)
-  if (error) console.warn('[orderSync] delete error', error)
+  if (error) {
+    console.warn('[orderSync] delete error', error)
+    return false
+  }
+  return true
 }
 
 /** 해당 날짜 발주서 전체 삭제 */

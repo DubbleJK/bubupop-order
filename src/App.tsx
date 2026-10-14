@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect } from 'react'
-import { supabase, isSupabaseEnabled } from './lib/supabase'
-import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOrder, updateOrder, orderDateKey, mergeMonthOrders } from './lib/orderSync'
+import { supabase } from './lib/supabase'
+import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOrder, updateOrder, orderDateKey, mergeMonthOrders, pingOrders } from './lib/orderSync'
 import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, formatOrderText, orderWrittenAt, resolveDelivery } from './lib/orderFormat'
 import { LedgerView, currentMonthKey, shiftMonth } from './LedgerView'
-import { getLedgerPassword } from './lib/ledgerPassword'
+import { matchesSharedLedgerPassword } from './lib/ledgerPassword'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
 import styles from './App.module.css'
 
@@ -77,17 +77,32 @@ function App() {
   const [askLedgerPw, setAskLedgerPw] = useState(false)
   const [ledgerPwInput, setLedgerPwInput] = useState('')
   const [ledgerPwError, setLedgerPwError] = useState('')
+  const [ledgerPwChecking, setLedgerPwChecking] = useState(false)
+  const [syncState, setSyncState] = useState<'off' | 'checking' | 'on' | 'error'>(supabase ? 'checking' : 'off')
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([])
   const [printNotice, setPrintNotice] = useState('')
   const [orderBlocks, setOrderBlocks] = useState<OrderBlock[]>([])
   const [editingPrependNextBlock, setEditingPrependNextBlock] = useState(false)
 
-  /** 완료하지 않은 발주서를 인쇄 목록으로 불러오기 */
+  /** 완료하지 않은 발주서를 인쇄 목록으로 불러오고, 서버가 응답하는지도 확인 */
   useEffect(() => {
     if (!supabase) return
+    let cancel = false
     fetchOpenOrders().then(({ orders, error }) => {
+      if (cancel) return
+      setSyncState(error ? 'error' : 'on')
       if (!error) setOrderList(orders)
     })
+    const onFocus = () => {
+      pingOrders().then(ok => {
+        if (!cancel) setSyncState(ok ? 'on' : 'error')
+      })
+    }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      cancel = true
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
 
   const goToOrderDetail = useCallback((type: OrderType) => {
@@ -370,6 +385,21 @@ function App() {
     setSelectedOrderIds(prev => (prev.includes(id) ? prev.filter(value => value !== id) : [...prev, id]))
   }, [])
 
+  const removeLedgerOrder = useCallback((item: OrderListItem) => {
+    const name = item.ordererName || '이 발주서'
+    if (!window.confirm(`${name} 건을 가계부에서 뺄까요? 반품·환불로 장부에서 지우고, 인쇄 목록에 남아 있어도 함께 사라집니다.`)) return
+    void deleteOrder(item.id).then(ok => {
+      if (!ok) {
+        setLedgerNotice('서버에 연결되지 않아 가계부에서 빼지 못했습니다.')
+        return
+      }
+      setLedgerOrders(prev => prev.filter(order => order.id !== item.id))
+      setOrderList(prev => prev.filter(order => order.id !== item.id))
+      setSelectedOrderIds(prev => prev.filter(id => id !== item.id))
+      setExpandedOrderId(prev => (prev === item.id ? null : prev))
+    })
+  }, [])
+
   const saveOrderMoney = useCallback((item: OrderListItem, patch: { quoteAmount?: number | null; paid?: boolean }) => {
     const next = { ...item, ...patch, dateKey: orderDateKey(item) }
     setOrderList(prev => prev.map(order => (order.id === item.id ? { ...order, ...patch, dateKey: next.dateKey } : order)))
@@ -391,6 +421,7 @@ function App() {
     fetchOrdersForMonth(monthKey).then(({ orders, error }) => {
       setLedgerOrders(mergeMonthOrders(orders, local, monthKey))
       setLedgerNotice(error ? '서버에 연결되지 않아, 이 화면에 있는 발주서를 가계부에 표시합니다.' : '')
+      setSyncState(error ? 'error' : 'on')
       setLedgerLoading(false)
     })
   }, [orderList])
@@ -428,11 +459,12 @@ function App() {
         monthKey={ledgerMonth}
         orders={ledgerOrders}
         loading={ledgerLoading}
-        synced={isSupabaseEnabled()}
+        synced={syncState === 'on'}
         notice={ledgerNotice}
         onBack={goMain}
         onShiftMonth={delta => loadLedger(shiftMonth(ledgerMonth, delta))}
         onSave={saveOrderMoney}
+        onRemove={removeLedgerOrder}
       />
     )
   }
@@ -441,11 +473,19 @@ function App() {
     return (
       <div className={styles.wrapper}>
         <h1 className={styles.title}>발주서 발행기</h1>
-        {isSupabaseEnabled() ? (
-          <p className={styles.syncBadge}>PC·폰 동기화 연결됨</p>
-        ) : (
-          <p className={styles.syncBadgeOff}>로컬만 (동기화 안 됨)</p>
-        )}
+        <p
+          className={
+            syncState === 'on' ? styles.syncBadge : syncState === 'error' ? styles.syncBadgeError : styles.syncBadgeOff
+          }
+        >
+          {syncState === 'on'
+            ? 'PC·폰 동기화 연결됨'
+            : syncState === 'checking'
+              ? '서버 연결 확인 중'
+              : syncState === 'error'
+                ? '서버에 연결되지 않음'
+                : '로컬만 (동기화 안 됨)'}
+        </p>
 
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>주문자 이름</h2>
@@ -644,15 +684,21 @@ function App() {
             className={styles.ledgerPwBox}
             onSubmit={e => {
               e.preventDefault()
-              if (ledgerPwInput !== getLedgerPassword()) {
-                setLedgerPwError('비밀번호가 맞지 않습니다.')
-                return
-              }
-              setAskLedgerPw(false)
-              setLedgerPwInput('')
+              if (ledgerPwChecking) return
+              setLedgerPwChecking(true)
               setLedgerPwError('')
-              loadLedger(currentMonthKey())
-              setScreen('ledger')
+              void matchesSharedLedgerPassword(ledgerPwInput).then(({ ok }) => {
+                setLedgerPwChecking(false)
+                if (!ok) {
+                  setLedgerPwError('비밀번호가 맞지 않습니다.')
+                  return
+                }
+                setAskLedgerPw(false)
+                setLedgerPwInput('')
+                setLedgerPwError('')
+                loadLedger(currentMonthKey())
+                setScreen('ledger')
+              })
             }}
           >
             <input
@@ -664,7 +710,9 @@ function App() {
             />
             {ledgerPwError ? <p className={styles.ledgerPwError}>{ledgerPwError}</p> : null}
             <div className={styles.ledgerPwActions}>
-              <button type="submit" className={styles.ledgerMonthBtn}>확인</button>
+              <button type="submit" className={styles.ledgerMonthBtn} disabled={ledgerPwChecking}>
+                {ledgerPwChecking ? '확인 중' : '확인'}
+              </button>
               <button
                 type="button"
                 className={styles.ledgerMonthBtn}

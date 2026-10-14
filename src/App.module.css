@@ -67,6 +67,17 @@
   display: inline-block;
 }
 
+.syncBadgeError {
+  margin: 0 0 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #9a3412;
+  background: #ffedd5;
+  padding: 6px 12px;
+  border-radius: 8px;
+  display: inline-block;
+}
+
 .section {
   margin-bottom: 28px;
   width: 100%;
@@ -1240,6 +1251,22 @@
 .ledgerWho span {
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.ledgerRemoveBtn {
+  margin-top: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #9f1239;
+  background: #fff;
+  border: 1px solid #fda4af;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.ledgerRemoveBtn:hover {
+  background: #fff1f2;
 }
 
 .orderListEmpty {

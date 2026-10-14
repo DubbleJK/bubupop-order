@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { formatLedgerDetail, orderWrittenAt } from './lib/orderFormat'
-import { getLedgerPassword, setLedgerPassword } from './lib/ledgerPassword'
+import { matchesSharedLedgerPassword, writeSharedLedgerPassword } from './lib/ledgerPassword'
 import { orderDateKey } from './lib/orderSync'
+import { isSupabaseEnabled } from './lib/supabase'
 import type { OrderListItem } from './types'
 import styles from './App.module.css'
 
@@ -104,14 +105,11 @@ function PasswordChange() {
   const [again, setAgain] = useState('')
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  const save = () => {
+  const save = async () => {
     setMessage('')
     setError('')
-    if (current !== getLedgerPassword()) {
-      setError('현재 비밀번호가 맞지 않습니다.')
-      return
-    }
     if (!next.trim()) {
       setError('새 비밀번호를 입력해 주세요.')
       return
@@ -120,11 +118,27 @@ function PasswordChange() {
       setError('새 비밀번호가 서로 다릅니다.')
       return
     }
-    setLedgerPassword(next)
+    setSaving(true)
+    const { ok: currentOk } = await matchesSharedLedgerPassword(current)
+    if (!currentOk) {
+      setSaving(false)
+      setError('현재 비밀번호가 맞지 않습니다.')
+      return
+    }
+    const ok = await writeSharedLedgerPassword(next)
+    setSaving(false)
+    if (!ok) {
+      setError('서버에 연결되지 않아 비밀번호를 바꾸지 못했습니다.')
+      return
+    }
     setCurrent('')
     setNext('')
     setAgain('')
-    setMessage('비밀번호를 바꿨습니다.')
+    setMessage(
+      isSupabaseEnabled()
+        ? '비밀번호를 바꿨습니다. PC와 폰이 같은 비밀번호를 씁니다.'
+        : '이 기기의 비밀번호를 바꿨습니다.'
+    )
   }
 
   return (
@@ -134,13 +148,14 @@ function PasswordChange() {
       </button>
       {open ? (
         <div className={styles.ledgerPwBox}>
+          <p className={styles.moneyNote}>여기서 바꾸면 PC와 폰이 같은 비밀번호를 씁니다. 처음 비밀번호는 1000입니다.</p>
           <input type="password" value={current} onChange={e => setCurrent(e.target.value)} placeholder="현재 비밀번호" />
           <input type="password" value={next} onChange={e => setNext(e.target.value)} placeholder="새 비밀번호" />
           <input type="password" value={again} onChange={e => setAgain(e.target.value)} placeholder="새 비밀번호 확인" />
           {error ? <p className={styles.ledgerPwError}>{error}</p> : null}
           {message ? <p className={styles.moneyNote}>{message}</p> : null}
-          <button type="button" className={styles.ledgerMonthBtn} onClick={save}>
-            저장
+          <button type="button" className={styles.ledgerMonthBtn} onClick={() => void save()} disabled={saving}>
+            {saving ? '저장 중' : '저장'}
           </button>
         </div>
       ) : null}
@@ -207,6 +222,7 @@ export function LedgerView({
   onBack,
   onShiftMonth,
   onSave,
+  onRemove,
 }: {
   monthKey: string
   orders: OrderListItem[]
@@ -216,6 +232,7 @@ export function LedgerView({
   onBack: () => void
   onShiftMonth: (delta: number) => void
   onSave: (item: OrderListItem, patch: MoneyPatch) => void
+  onRemove: (item: OrderListItem) => void
 }) {
   const quoted = orders.filter(item => typeof item.quoteAmount === 'number')
   const total = quoted.reduce((sum, item) => sum + (item.quoteAmount ?? 0), 0)
@@ -302,6 +319,9 @@ export function LedgerView({
                   <pre className={styles.ledgerDetail}>{detail.details}</pre>
                   {detail.note ? <p className={styles.ledgerNote}>비고 {detail.note}</p> : null}
                   <OrderMoneyFields item={item} showNote={false} onSave={patch => onSave(item, patch)} />
+                  <button type="button" className={styles.ledgerRemoveBtn} onClick={() => onRemove(item)}>
+                    장부에서 빼기
+                  </button>
                 </li>
               )
             })}
