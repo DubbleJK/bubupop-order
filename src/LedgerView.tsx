@@ -174,7 +174,7 @@ export function OrderMoneyFields({
   showNote = true,
 }: {
   item: OrderListItem
-  onSave: (patch: MoneyPatch) => void
+  onSave: (patch: MoneyPatch) => void | boolean | Promise<boolean | void>
   showNote?: boolean
 }) {
   const [text, setText] = useState(item.quoteAmount == null ? '' : String(item.quoteAmount))
@@ -195,7 +195,9 @@ export function OrderMoneyFields({
           onBlur={() => {
             const next = text ? Number(text) : null
             if (next === (item.quoteAmount ?? null)) return
-            onSave({ quoteAmount: next })
+            void Promise.resolve(onSave({ quoteAmount: next })).then(ok => {
+              if (ok === false) setText(item.quoteAmount == null ? '' : String(item.quoteAmount))
+            })
           }}
           placeholder="금액"
         />

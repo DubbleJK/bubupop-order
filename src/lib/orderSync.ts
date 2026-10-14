@@ -140,20 +140,24 @@ export function mergeMonthOrders(
   return Array.from(map.values()).sort((a, b) => orderDateKey(a).localeCompare(orderDateKey(b)) || a.id.localeCompare(b.id))
 }
 
-/** 발주서 한 건 저장 */
-export async function insertOrder(dateKey: string, item: OrderListItem): Promise<void> {
-  if (!supabase) return
+/** 발주서 한 건 저장. 서버 저장이 실패하면 false */
+export async function insertOrder(dateKey: string, item: OrderListItem): Promise<boolean> {
+  if (!supabase) return true
   const { error } = await supabase.from(TABLE).insert({
     id: item.id,
     date_key: dateKey,
     order_data: { ...item, dateKey },
   })
-  if (error) console.warn('[orderSync] insert error', error)
+  if (error) {
+    console.warn('[orderSync] insert error', error)
+    return false
+  }
+  return true
 }
 
-/** 견적 금액·입금 여부 등 발주서 내용 수정 */
-export async function updateOrder(item: OrderListItem): Promise<void> {
-  if (!supabase) return
+/** 견적 금액·입금 여부 등 발주서 내용 수정. 서버 저장이 실패하면 false */
+export async function updateOrder(item: OrderListItem): Promise<boolean> {
+  if (!supabase) return true
   const dateKey = orderDateKey(item)
   const { error } = await supabase
     .from(TABLE)
@@ -162,7 +166,11 @@ export async function updateOrder(item: OrderListItem): Promise<void> {
       order_data: { ...item, dateKey },
     })
     .eq('id', item.id)
-  if (error) console.warn('[orderSync] update error', error)
+  if (error) {
+    console.warn('[orderSync] update error', error)
+    return false
+  }
+  return true
 }
 
 /** 서버에 발주서 표가 응답하는지 확인 */

@@ -78,6 +78,32 @@
   display: inline-block;
 }
 
+.editBanner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 20px;
+  padding: 10px 12px;
+  border: 1px solid #fdba74;
+  border-radius: 8px;
+  background: #fff7ed;
+}
+
+.editBanner p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #9a3412;
+}
+
+.editMark {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9a3412;
+}
+
 .section {
   margin-bottom: 28px;
   width: 100%;

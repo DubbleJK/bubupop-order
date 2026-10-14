@@ -4,6 +4,7 @@ import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOr
 import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, formatOrderText, orderWrittenAt, resolveDelivery } from './lib/orderFormat'
 import { LedgerView, currentMonthKey, shiftMonth } from './LedgerView'
 import { matchesSharedLedgerPassword } from './lib/ledgerPassword'
+import { shrinkDataUrl, shrinkDesignFile } from './lib/shrinkImage'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
 import styles from './App.module.css'
 
@@ -65,7 +66,7 @@ function App() {
 
   const [memo, setMemo] = useState('')
   const [orderList, setOrderList] = useState<OrderListItem[]>([])
-  const [listAddMessage, setListAddMessage] = useState(false)
+  const [listAddMessage, setListAddMessage] = useState('')
   const [formError, setFormError] = useState('')
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
   const [quoteAmountInput, setQuoteAmountInput] = useState('')
@@ -83,6 +84,11 @@ function App() {
   const [printNotice, setPrintNotice] = useState('')
   const [orderBlocks, setOrderBlocks] = useState<OrderBlock[]>([])
   const [editingPrependNextBlock, setEditingPrependNextBlock] = useState(false)
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
+  const [editingDateKey, setEditingDateKey] = useState<string | null>(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+  const [saveNotice, setSaveNotice] = useState('')
+  const [imageNotice, setImageNotice] = useState('')
 
   /** 완료하지 않은 발주서를 인쇄 목록으로 불러오고, 서버가 응답하는지도 확인 */
   useEffect(() => {
@@ -184,72 +190,16 @@ function App() {
   const handleTshirtDesignUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files?.length) return
+    setImageNotice('')
     Array.from(files).forEach(file => {
-      const reader = new FileReader()
-      reader.onload = () =>
-        setTshirtItem(prev => ({ ...prev, designImages: [...prev.designImages, reader.result as string] }))
-      reader.readAsDataURL(file)
+      void shrinkDesignFile(file)
+        .then(src => setTshirtItem(prev => ({ ...prev, designImages: [...prev.designImages, src] })))
+        .catch(() => setImageNotice('시안 이미지를 읽지 못했습니다.'))
     })
+    e.target.value = ''
   }, [])
 
-  const generateOrder = useCallback(() => {
-    const writtenAt = new Date()
-    const blocks = orderBlocks.map(compactBlock).filter((b): b is OrderBlock => b !== null)
-    if (blocks.length === 0) {
-      setFormError('품목을 한 줄 이상 입력한 뒤 발주서를 생성해 주세요.')
-      return
-    }
-    setFormError('')
-    const delivery = resolveDelivery(deliveryDate, deliveryDateOther, writtenAt)
-    const fullText = formatOrderText({
-      ordererName,
-      orderChannel,
-      deliveryDate,
-      deliveryDateOther,
-      memo,
-      orderBlocks: blocks,
-      writtenAt,
-    })
-    const productLabels = blocks.map(b => ORDER_TYPE_LABELS[b.orderType]).join(', ')
-    const allDesignImages = blocks
-      .filter(b => b.orderType === 'tshirt')
-      .flatMap(b => b.tshirtItem?.designImages ?? [])
-
-    const newItem: OrderListItem = {
-      id: Date.now().toString(),
-      ordererName,
-      orderChannel,
-      deliveryLabel: delivery.display,
-      deliveryDate,
-      deliveryDateOther: deliveryDateOther || '',
-      orderProduct: productLabels,
-      fullText,
-      orderType: blocks[0].orderType,
-      designImages: allDesignImages,
-      memo,
-      quoteAmount: quoteAmountInput ? Number(quoteAmountInput) : null,
-      paid: paidNow,
-      dateKey: getDateKey(),
-      orderBlocks: blocks.map(b => ({
-        ...b,
-        popItems: b.popItems ? [...b.popItems] : undefined,
-        stickerItems: b.stickerItems ? [...b.stickerItems] : undefined,
-        dtfItems: b.dtfItems ? [...b.dtfItems] : undefined,
-        cardBannerItems: b.cardBannerItems ? [...b.cardBannerItems] : undefined,
-        tshirtItem: b.tshirtItem
-          ? {
-              ...b.tshirtItem,
-              designImages: [...b.tshirtItem.designImages],
-              kidsSizes: [...b.tshirtItem.kidsSizes],
-            }
-          : undefined,
-      })),
-    }
-    setOrderList(prev => [...prev, newItem])
-    const dateKey = getDateKey()
-    insertOrder(dateKey, newItem)
-    setListAddMessage(true)
-    setTimeout(() => setListAddMessage(false), 2000)
+  const clearDraft = useCallback(() => {
     setOrderBlocks([])
     setOrdererName('')
     setOrderChannel('')
@@ -266,8 +216,101 @@ function App() {
     setMemo('')
     setQuoteAmountInput('')
     setPaidNow(false)
+    setEditingOrderId(null)
+    setEditingDateKey(null)
+    setEditingPrependNextBlock(false)
+    setFormError('')
+  }, [])
+
+  const cancelEdit = useCallback(() => {
+    clearDraft()
+    setScreen('main')
+  }, [clearDraft])
+
+  const generateOrder = useCallback(async () => {
+    if (savingOrder) return
+    const writtenAt = new Date()
+    const blocks = orderBlocks.map(compactBlock).filter((b): b is OrderBlock => b !== null)
+    if (blocks.length === 0) {
+      setFormError('품목을 한 줄 이상 입력한 뒤 발주서를 생성해 주세요.')
+      return
+    }
+    setFormError('')
+    setSavingOrder(true)
+    const prepared = await Promise.all(
+      blocks.map(async block => {
+        if (block.orderType !== 'tshirt' || !block.tshirtItem) return block
+        const designImages = await Promise.all(block.tshirtItem.designImages.map(src => shrinkDataUrl(src)))
+        return { ...block, tshirtItem: { ...block.tshirtItem, designImages } }
+      })
+    )
+    const delivery = resolveDelivery(deliveryDate, deliveryDateOther, writtenAt)
+    const fullText = formatOrderText({
+      ordererName,
+      orderChannel,
+      deliveryDate,
+      deliveryDateOther,
+      memo,
+      orderBlocks: prepared,
+      writtenAt,
+    })
+    const productLabels = prepared.map(b => ORDER_TYPE_LABELS[b.orderType]).join(', ')
+    const allDesignImages = prepared
+      .filter(b => b.orderType === 'tshirt')
+      .flatMap(b => b.tshirtItem?.designImages ?? [])
+    const dateKey = editingDateKey || getDateKey()
+    const newItem: OrderListItem = {
+      id: editingOrderId || Date.now().toString(),
+      ordererName,
+      orderChannel,
+      deliveryLabel: delivery.display,
+      deliveryDate,
+      deliveryDateOther: deliveryDateOther || '',
+      orderProduct: productLabels,
+      fullText,
+      orderType: prepared[0].orderType,
+      designImages: allDesignImages,
+      memo,
+      quoteAmount: quoteAmountInput ? Number(quoteAmountInput) : null,
+      paid: paidNow,
+      dateKey,
+      orderBlocks: prepared.map(b => ({
+        ...b,
+        popItems: b.popItems ? [...b.popItems] : undefined,
+        stickerItems: b.stickerItems ? [...b.stickerItems] : undefined,
+        dtfItems: b.dtfItems ? [...b.dtfItems] : undefined,
+        cardBannerItems: b.cardBannerItems ? [...b.cardBannerItems] : undefined,
+        tshirtItem: b.tshirtItem
+          ? {
+              ...b.tshirtItem,
+              designImages: [...b.tshirtItem.designImages],
+              kidsSizes: [...b.tshirtItem.kidsSizes],
+            }
+          : undefined,
+      })),
+    }
+    const ok = editingOrderId ? await updateOrder(newItem) : await insertOrder(dateKey, newItem)
+    setSavingOrder(false)
+    if (!ok) {
+      setFormError(
+        editingOrderId
+          ? '서버에 저장하지 못했습니다. 인쇄 목록의 원래 발주서는 그대로입니다.'
+          : '서버에 저장하지 못했습니다. 다시 눌러 주세요.'
+      )
+      setSyncState('error')
+      return
+    }
+    setOrderList(prev => {
+      const exists = prev.some(order => order.id === newItem.id)
+      return exists ? prev.map(order => (order.id === newItem.id ? newItem : order)) : [...prev, newItem]
+    })
+    setSaveNotice('')
+    setListAddMessage(editingOrderId ? '수정한 내용이 저장되었습니다.' : '목록에 추가되었습니다.')
+    setTimeout(() => setListAddMessage(''), 2000)
+    clearDraft()
     setScreen('main')
   }, [
+    savingOrder,
     ordererName,
     orderChannel,
     deliveryDate,
@@ -276,14 +319,28 @@ function App() {
     memo,
     quoteAmountInput,
     paidNow,
+    editingOrderId,
+    editingDateKey,
+    clearDraft,
   ])
 
   const removeOrderFromList = useCallback((id: string) => {
-    deleteOrder(id)
-    setExpandedOrderId(prev => (prev === id ? null : prev))
-    setSelectedOrderIds(prev => prev.filter(value => value !== id))
-    setOrderList(prev => prev.filter(item => item.id !== id))
-  }, [])
+    void deleteOrder(id).then(ok => {
+      if (!ok) {
+        setSaveNotice('서버에서 지우지 못했습니다. 목록에 그대로 둡니다.')
+        setSyncState('error')
+        return
+      }
+      setExpandedOrderId(prev => (prev === id ? null : prev))
+      setSelectedOrderIds(prev => prev.filter(value => value !== id))
+      setOrderList(prev => prev.filter(item => item.id !== id))
+      if (editingOrderId === id) {
+        setEditingOrderId(null)
+        setEditingDateKey(null)
+      }
+      setSaveNotice('')
+    })
+  }, [editingOrderId])
 
   const startEditOrder = useCallback((item: OrderListItem) => {
     if (!item.orderBlocks?.length) return
@@ -299,9 +356,12 @@ function App() {
     setQuoteAmountInput(item.quoteAmount == null ? '' : String(item.quoteAmount))
     setPaidNow(!!item.paid)
     setOrderBlocks(rest)
-    deleteOrder(item.id)
-    setOrderList(prev => prev.filter(x => x.id !== item.id))
+    setEditingOrderId(item.id)
+    setEditingDateKey(orderDateKey(item))
     setEditingPrependNextBlock(true)
+    setSaveNotice('')
+    setFormError('')
+    setImageNotice('')
 
     switch (first.orderType) {
       case 'pop':
@@ -366,18 +426,29 @@ function App() {
   const clearOrderList = useCallback(() => {
     if (orderList.length === 0) return
     if (!window.confirm('인쇄 목록의 발주서를 모두 삭제할까요? 가계부에서도 지워집니다.')) return
-    orderList.forEach(item => deleteOrder(item.id))
-    setSelectedOrderIds([])
-    setOrderList([])
+    void Promise.all(orderList.map(async item => ({ id: item.id, ok: await deleteOrder(item.id) }))).then(results => {
+      const failed = new Set(results.filter(result => !result.ok).map(result => result.id))
+      setOrderList(prev => prev.filter(item => failed.has(item.id)))
+      setSelectedOrderIds(prev => prev.filter(id => failed.has(id)))
+      setSaveNotice(failed.size ? '일부 발주서를 서버에서 지우지 못했습니다. 남은 건은 목록에 그대로 둡니다.' : '')
+      if (failed.size) setSyncState('error')
+    })
   }, [orderList])
 
   const completeOrder = useCallback((item: OrderListItem) => {
     if (!window.confirm('인쇄 목록에서 뺄까요? 가계부 기록은 그대로 남습니다.')) return
     const next = { ...item, completed: true, dateKey: orderDateKey(item) }
-    setOrderList(prev => prev.filter(order => order.id !== item.id))
-    setSelectedOrderIds(prev => prev.filter(id => id !== item.id))
-    setLedgerOrders(prev => prev.map(order => (order.id === item.id ? next : order)))
-    updateOrder(next)
+    void updateOrder(next).then(ok => {
+      if (!ok) {
+        setSaveNotice('서버에 저장하지 못했습니다. 완료 처리가 반영되지 않았습니다.')
+        setSyncState('error')
+        return
+      }
+      setOrderList(prev => prev.filter(order => order.id !== item.id))
+      setSelectedOrderIds(prev => prev.filter(id => id !== item.id))
+      setLedgerOrders(prev => prev.map(order => (order.id === item.id ? next : order)))
+      setSaveNotice('')
+    })
   }, [])
 
   const toggleSelected = useCallback((id: string) => {
@@ -402,9 +473,16 @@ function App() {
 
   const saveOrderMoney = useCallback((item: OrderListItem, patch: { quoteAmount?: number | null; paid?: boolean }) => {
     const next = { ...item, ...patch, dateKey: orderDateKey(item) }
-    setOrderList(prev => prev.map(order => (order.id === item.id ? { ...order, ...patch, dateKey: next.dateKey } : order)))
-    setLedgerOrders(prev => prev.map(order => (order.id === item.id ? { ...order, ...patch, dateKey: next.dateKey } : order)))
-    updateOrder(next)
+    return updateOrder(next).then(ok => {
+      if (!ok) {
+        setLedgerNotice('서버에 저장하지 못했습니다. 금액과 입금 표시는 이전 값으로 남습니다.')
+        setSyncState('error')
+        return false
+      }
+      setOrderList(prev => prev.map(order => (order.id === item.id ? { ...order, ...patch, dateKey: next.dateKey } : order)))
+      setLedgerOrders(prev => prev.map(order => (order.id === item.id ? { ...order, ...patch, dateKey: next.dateKey } : order)))
+      return true
+    })
   }, [])
 
   const loadLedger = useCallback((monthKey: string) => {
@@ -486,6 +564,14 @@ function App() {
                 ? '서버에 연결되지 않음'
                 : '로컬만 (동기화 안 됨)'}
         </p>
+        {editingOrderId ? (
+          <div className={styles.editBanner}>
+            <p>수정 중입니다. 발주서 생성을 눌러야 반영되고, 그 전에 나가도 원래 발주서는 남습니다.</p>
+            <button type="button" className={styles.ledgerMonthBtn} onClick={cancelEdit}>
+              수정 취소
+            </button>
+          </div>
+        ) : null}
 
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>주문자 이름</h2>
@@ -582,6 +668,7 @@ function App() {
         <section className={styles.orderListSection}>
           <h2 className={styles.sectionTitle}>인쇄 목록</h2>
           <p className={styles.hint}>완료를 누르기 전에는 다음 날에도 남습니다. 출력은 체크한 건만 됩니다.</p>
+          {saveNotice ? <p className={styles.ledgerPwError}>{saveNotice}</p> : null}
           {orderList.length === 0 ? (
             <p className={styles.orderListEmpty}>완료하지 않은 발주서가 없습니다.</p>
           ) : (
@@ -603,6 +690,7 @@ function App() {
                       onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
                     >
                       <span className={styles.orderListDate}>{writtenLabel(item)}</span>
+                      {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
                       {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
                       {item.deliveryLabel ? (
                         <span className={item.deliveryDate === 'urgent' ? styles.deliveryUrgent : undefined}>
@@ -1039,6 +1127,7 @@ function App() {
         <div className={styles.tshirtSection}>
           <span className={styles.sizeLabel}>디자인 등록</span>
           <input type="file" accept="image/*" multiple onChange={handleTshirtDesignUpload} className={styles.fileInput} />
+          {imageNotice ? <p className={styles.ledgerPwError}>{imageNotice}</p> : null}
           {tshirtItem.designImages.length > 0 && (
             <div className={styles.imagePreview}>
               {tshirtItem.designImages.map((src, i) => (
@@ -1242,15 +1331,16 @@ function App() {
         {formError ? <p className={styles.generateError}>{formError}</p> : null}
 
         <div className={styles.summaryBtnRow}>
-          <button type="button" className={`${styles.generateBtn} ${styles.generateBtnRed}`} onClick={generateOrder}>
-            발주서 생성
+          <button type="button" className={`${styles.generateBtn} ${styles.generateBtnRed}`} onClick={() => void generateOrder()} disabled={savingOrder}>
+            {savingOrder ? '저장 중' : editingOrderId ? '수정 내용 저장' : '발주서 생성'}
           </button>
         </div>
-        {listAddMessage && <p className={styles.listAddMessage}>목록에 추가되었습니다.</p>}
+        {listAddMessage ? <p className={styles.listAddMessage}>{listAddMessage}</p> : null}
 
         <section className={styles.orderListSection}>
           <h2 className={styles.sectionTitle}>인쇄 목록</h2>
           <p className={styles.hint}>완료를 누르기 전에는 다음 날에도 남습니다. 출력은 체크한 건만 됩니다.</p>
+          {saveNotice ? <p className={styles.ledgerPwError}>{saveNotice}</p> : null}
           {orderList.length === 0 ? (
             <p className={styles.orderListEmpty}>완료하지 않은 발주서가 없습니다.</p>
           ) : (
@@ -1272,6 +1362,7 @@ function App() {
                       onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
                     >
                       <span className={styles.orderListDate}>{writtenLabel(item)}</span>
+                      {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
                       {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
                       {item.deliveryLabel ? (
                         <span className={item.deliveryDate === 'urgent' ? styles.deliveryUrgent : undefined}>
@@ -1398,15 +1489,16 @@ function App() {
         {formError ? <p className={styles.generateError}>{formError}</p> : null}
 
         <div className={styles.summaryBtnRow}>
-          <button type="button" className={`${styles.generateBtn} ${styles.generateBtnRed}`} onClick={generateOrder}>
-            발주서 생성
+          <button type="button" className={`${styles.generateBtn} ${styles.generateBtnRed}`} onClick={() => void generateOrder()} disabled={savingOrder}>
+            {savingOrder ? '저장 중' : editingOrderId ? '수정 내용 저장' : '발주서 생성'}
           </button>
         </div>
-        {listAddMessage && <p className={styles.listAddMessage}>목록에 추가되었습니다.</p>}
+        {listAddMessage ? <p className={styles.listAddMessage}>{listAddMessage}</p> : null}
 
         <section className={styles.orderListSection}>
           <h2 className={styles.sectionTitle}>인쇄 목록</h2>
           <p className={styles.hint}>완료를 누르기 전에는 다음 날에도 남습니다. 출력은 체크한 건만 됩니다.</p>
+          {saveNotice ? <p className={styles.ledgerPwError}>{saveNotice}</p> : null}
           {orderList.length === 0 ? (
             <p className={styles.orderListEmpty}>완료하지 않은 발주서가 없습니다.</p>
           ) : (
@@ -1428,6 +1520,7 @@ function App() {
                       onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
                     >
                       <span className={styles.orderListDate}>{writtenLabel(item)}</span>
+                      {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
                       {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
                       {item.deliveryLabel ? (
                         <span className={item.deliveryDate === 'urgent' ? styles.deliveryUrgent : undefined}>
