@@ -1,9 +1,9 @@
 import { useState, useCallback, useEffect } from 'react'
 import { supabase } from './lib/supabase'
-import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOrder, updateOrder, orderDateKey, mergeMonthOrders, pingOrders } from './lib/orderSync'
+import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOrder, updateOrder, saveOrderAmount, orderDateKey, mergeMonthOrders, pingOrders } from './lib/orderSync'
+import { getLedgerSession, matchesSharedLedgerPassword } from './lib/ledgerPassword'
 import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, formatOrderText, orderWrittenAt, resolveDelivery } from './lib/orderFormat'
 import { LedgerView, currentMonthKey, shiftMonth } from './LedgerView'
-import { matchesSharedLedgerPassword } from './lib/ledgerPassword'
 import { shrinkDataUrl, shrinkDesignFile } from './lib/shrinkImage'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
 import styles from './App.module.css'
@@ -86,6 +86,7 @@ function App() {
   const [editingPrependNextBlock, setEditingPrependNextBlock] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
   const [editingDateKey, setEditingDateKey] = useState<string | null>(null)
+  const [moneyDirty, setMoneyDirty] = useState(false)
   const [savingOrder, setSavingOrder] = useState(false)
   const [saveNotice, setSaveNotice] = useState('')
   const [imageNotice, setImageNotice] = useState('')
@@ -218,6 +219,7 @@ function App() {
     setPaidNow(false)
     setEditingOrderId(null)
     setEditingDateKey(null)
+    setMoneyDirty(false)
     setEditingPrependNextBlock(false)
     setFormError('')
   }, [])
@@ -289,7 +291,9 @@ function App() {
           : undefined,
       })),
     }
-    const ok = editingOrderId ? await updateOrder(newItem) : await insertOrder(dateKey, newItem)
+    const ok = editingOrderId
+      ? await updateOrder(newItem, { includeMoney: moneyDirty })
+      : await insertOrder(dateKey, newItem)
     setSavingOrder(false)
     if (!ok) {
       setFormError(
@@ -321,6 +325,7 @@ function App() {
     paidNow,
     editingOrderId,
     editingDateKey,
+    moneyDirty,
     clearDraft,
   ])
 
@@ -358,6 +363,7 @@ function App() {
     setOrderBlocks(rest)
     setEditingOrderId(item.id)
     setEditingDateKey(orderDateKey(item))
+    setMoneyDirty(false)
     setEditingPrependNextBlock(true)
     setSaveNotice('')
     setFormError('')
@@ -438,7 +444,7 @@ function App() {
   const completeOrder = useCallback((item: OrderListItem) => {
     if (!window.confirm('인쇄 목록에서 뺄까요? 가계부 기록은 그대로 남습니다.')) return
     const next = { ...item, completed: true, dateKey: orderDateKey(item) }
-    void updateOrder(next).then(ok => {
+    void updateOrder(next, { includeMoney: false }).then(ok => {
       if (!ok) {
         setSaveNotice('서버에 저장하지 못했습니다. 완료 처리가 반영되지 않았습니다.')
         setSyncState('error')
@@ -473,7 +479,8 @@ function App() {
 
   const saveOrderMoney = useCallback((item: OrderListItem, patch: { quoteAmount?: number | null; paid?: boolean }) => {
     const next = { ...item, ...patch, dateKey: orderDateKey(item) }
-    return updateOrder(next).then(ok => {
+    return saveOrderAmount(item.id, next.quoteAmount ?? null, !!next.paid).then(async saved => {
+      const ok = saved || (await updateOrder(next, { includeMoney: true }))
       if (!ok) {
         setLedgerNotice('서버에 저장하지 못했습니다. 금액과 입금 표시는 이전 값으로 남습니다.')
         setSyncState('error')
@@ -496,7 +503,7 @@ function App() {
     }
     setLedgerLoading(true)
     setLedgerNotice('')
-    fetchOrdersForMonth(monthKey).then(({ orders, error }) => {
+    fetchOrdersForMonth(monthKey, getLedgerSession()).then(({ orders, error }) => {
       setLedgerOrders(mergeMonthOrders(orders, local, monthKey))
       setLedgerNotice(error ? '서버에 연결되지 않아, 이 화면에 있는 발주서를 가계부에 표시합니다.' : '')
       setSyncState(error ? 'error' : 'on')
@@ -1310,12 +1317,18 @@ function App() {
             inputMode="numeric"
             className={styles.input}
             value={quoteAmountInput ? Number(quoteAmountInput).toLocaleString('ko-KR') : ''}
-            onChange={e => setQuoteAmountInput(e.target.value.replace(/[^\d]/g, ''))}
+            onChange={e => {
+              setMoneyDirty(true)
+              setQuoteAmountInput(e.target.value.replace(/[^\d]/g, ''))
+            }}
             placeholder="숫자만 입력"
           />
           <span className={styles.hint}>발주서 인쇄에는 금액이 나오지 않습니다.</span>
+          {editingOrderId ? (
+            <span className={styles.hint}>금액을 바꾸지 않으면 가계부에 있는 금액이 유지됩니다.</span>
+          ) : null}
           <label className={styles.radioLabel}>
-            <input type="checkbox" checked={paidNow} onChange={e => setPaidNow(e.target.checked)} />
+            <input type="checkbox" checked={paidNow} onChange={e => { setMoneyDirty(true); setPaidNow(e.target.checked) }} />
             <span>입금 완료</span>
           </label>
         </div>
@@ -1468,12 +1481,18 @@ function App() {
             inputMode="numeric"
             className={styles.input}
             value={quoteAmountInput ? Number(quoteAmountInput).toLocaleString('ko-KR') : ''}
-            onChange={e => setQuoteAmountInput(e.target.value.replace(/[^\d]/g, ''))}
+            onChange={e => {
+              setMoneyDirty(true)
+              setQuoteAmountInput(e.target.value.replace(/[^\d]/g, ''))
+            }}
             placeholder="숫자만 입력"
           />
           <span className={styles.hint}>발주서 인쇄에는 금액이 나오지 않습니다.</span>
+          {editingOrderId ? (
+            <span className={styles.hint}>금액을 바꾸지 않으면 가계부에 있는 금액이 유지됩니다.</span>
+          ) : null}
           <label className={styles.radioLabel}>
-            <input type="checkbox" checked={paidNow} onChange={e => setPaidNow(e.target.checked)} />
+            <input type="checkbox" checked={paidNow} onChange={e => { setMoneyDirty(true); setPaidNow(e.target.checked) }} />
             <span>입금 완료</span>
           </label>
         </div>

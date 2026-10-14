@@ -125,7 +125,7 @@ function PasswordChange() {
       setError('현재 비밀번호가 맞지 않습니다.')
       return
     }
-    const ok = await writeSharedLedgerPassword(next)
+    const ok = await writeSharedLedgerPassword(current, next)
     setSaving(false)
     if (!ok) {
       setError('서버에 연결되지 않아 비밀번호를 바꾸지 못했습니다.')
