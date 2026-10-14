@@ -86,7 +86,8 @@ function App() {
   const [editingPrependNextBlock, setEditingPrependNextBlock] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
   const [editingDateKey, setEditingDateKey] = useState<string | null>(null)
-  const [moneyDirty, setMoneyDirty] = useState(false)
+  const [amountTouched, setAmountTouched] = useState(false)
+  const [paidTouched, setPaidTouched] = useState(false)
   const [savingOrder, setSavingOrder] = useState(false)
   const [saveNotice, setSaveNotice] = useState('')
   const [imageNotice, setImageNotice] = useState('')
@@ -219,7 +220,8 @@ function App() {
     setPaidNow(false)
     setEditingOrderId(null)
     setEditingDateKey(null)
-    setMoneyDirty(false)
+    setAmountTouched(false)
+    setPaidTouched(false)
     setEditingPrependNextBlock(false)
     setFormError('')
   }, [])
@@ -291,15 +293,33 @@ function App() {
           : undefined,
       })),
     }
+    if (editingOrderId && !amountTouched) delete newItem.quoteAmount
+    if (editingOrderId && !paidTouched) delete newItem.paid
+    let moneySaved = false
+    if (editingOrderId && (amountTouched || paidTouched)) {
+      const write: { quoteAmount?: number | null; paid?: boolean } = {}
+      if (amountTouched) write.quoteAmount = quoteAmountInput ? Number(quoteAmountInput) : null
+      if (paidTouched) write.paid = paidNow
+      const moneyOk = await saveOrderAmount(newItem.id, write)
+      if (!moneyOk) {
+        setSavingOrder(false)
+        setFormError('금액이나 입금 표시를 서버에 저장하지 못했습니다. 주문 내용은 바꾸지 않았습니다.')
+        setSyncState('error')
+        return
+      }
+      moneySaved = true
+    }
     const ok = editingOrderId
-      ? await updateOrder(newItem, { includeMoney: moneyDirty })
+      ? await updateOrder(newItem, { includeMoney: false })
       : await insertOrder(dateKey, newItem)
     setSavingOrder(false)
     if (!ok) {
       setFormError(
-        editingOrderId
-          ? '서버에 저장하지 못했습니다. 인쇄 목록의 원래 발주서는 그대로입니다.'
-          : '서버에 저장하지 못했습니다. 다시 눌러 주세요.'
+        moneySaved
+          ? '주문 내용을 서버에 저장하지 못했습니다. 금액 표시만 반영되었을 수 있습니다. 다시 눌러 주세요.'
+          : editingOrderId
+            ? '서버에 저장하지 못했습니다. 인쇄 목록의 원래 발주서는 그대로입니다.'
+            : '서버에 저장하지 못했습니다. 다시 눌러 주세요.'
       )
       setSyncState('error')
       return
@@ -325,7 +345,8 @@ function App() {
     paidNow,
     editingOrderId,
     editingDateKey,
-    moneyDirty,
+    amountTouched,
+    paidTouched,
     clearDraft,
   ])
 
@@ -363,7 +384,8 @@ function App() {
     setOrderBlocks(rest)
     setEditingOrderId(item.id)
     setEditingDateKey(orderDateKey(item))
-    setMoneyDirty(false)
+    setAmountTouched(false)
+    setPaidTouched(false)
     setEditingPrependNextBlock(true)
     setSaveNotice('')
     setFormError('')
@@ -479,7 +501,7 @@ function App() {
 
   const saveOrderMoney = useCallback((item: OrderListItem, patch: { quoteAmount?: number | null; paid?: boolean }) => {
     const next = { ...item, ...patch, dateKey: orderDateKey(item) }
-    return saveOrderAmount(item.id, next.quoteAmount ?? null, !!next.paid).then(async saved => {
+    return saveOrderAmount(item.id, patch).then(async saved => {
       const ok = saved || (await updateOrder(next, { includeMoney: true }))
       if (!ok) {
         setLedgerNotice('서버에 저장하지 못했습니다. 금액과 입금 표시는 이전 값으로 남습니다.')
@@ -1318,17 +1340,17 @@ function App() {
             className={styles.input}
             value={quoteAmountInput ? Number(quoteAmountInput).toLocaleString('ko-KR') : ''}
             onChange={e => {
-              setMoneyDirty(true)
+              setAmountTouched(true)
               setQuoteAmountInput(e.target.value.replace(/[^\d]/g, ''))
             }}
             placeholder="숫자만 입력"
           />
           <span className={styles.hint}>발주서 인쇄에는 금액이 나오지 않습니다.</span>
           {editingOrderId ? (
-            <span className={styles.hint}>금액을 바꾸지 않으면 가계부에 있는 금액이 유지됩니다.</span>
+            <span className={styles.hint}>금액이나 입금을 바꾸지 않으면 가계부에 있는 값이 유지됩니다.</span>
           ) : null}
           <label className={styles.radioLabel}>
-            <input type="checkbox" checked={paidNow} onChange={e => { setMoneyDirty(true); setPaidNow(e.target.checked) }} />
+            <input type="checkbox" checked={paidNow} onChange={e => { setPaidTouched(true); setPaidNow(e.target.checked) }} />
             <span>입금 완료</span>
           </label>
         </div>
@@ -1482,17 +1504,17 @@ function App() {
             className={styles.input}
             value={quoteAmountInput ? Number(quoteAmountInput).toLocaleString('ko-KR') : ''}
             onChange={e => {
-              setMoneyDirty(true)
+              setAmountTouched(true)
               setQuoteAmountInput(e.target.value.replace(/[^\d]/g, ''))
             }}
             placeholder="숫자만 입력"
           />
           <span className={styles.hint}>발주서 인쇄에는 금액이 나오지 않습니다.</span>
           {editingOrderId ? (
-            <span className={styles.hint}>금액을 바꾸지 않으면 가계부에 있는 금액이 유지됩니다.</span>
+            <span className={styles.hint}>금액이나 입금을 바꾸지 않으면 가계부에 있는 값이 유지됩니다.</span>
           ) : null}
           <label className={styles.radioLabel}>
-            <input type="checkbox" checked={paidNow} onChange={e => { setMoneyDirty(true); setPaidNow(e.target.checked) }} />
+            <input type="checkbox" checked={paidNow} onChange={e => { setPaidTouched(true); setPaidNow(e.target.checked) }} />
             <span>입금 완료</span>
           </label>
         </div>

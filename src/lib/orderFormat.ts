@@ -342,8 +342,11 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
+/** 인쇄 HTML에 넣을 수 있는 시안. base64 이미지 데이터만 허용한다. */
+const SAFE_IMAGE_SRC = /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/]+={0,2}$/i
+
 function isSafeImageSrc(src: string): boolean {
-  return src.startsWith('data:image/')
+  return SAFE_IMAGE_SRC.test(src)
 }
 
 function collectImages(item: OrderListItem): string[] {
@@ -414,7 +417,7 @@ function sheetHtml(item: OrderListItem, index: number, total: number): string {
   if (images.length > 0) {
     parts.push('<section class="images"><h2>시안</h2>')
     images.forEach(src => {
-      parts.push(`<img src="${src}" alt="시안" />`)
+      parts.push(`<img src="${escapeHtml(src)}" alt="시안" />`)
     })
     parts.push('</section>')
   }

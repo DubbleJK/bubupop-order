@@ -1,6 +1,7 @@
 -- 인쇄 목록 응답에서 견적 금액과 입금 여부를 빼는 설정.
--- Supabase SQL Editor에 전체를 붙여 넣고 Run 하세요.
--- 이미 배포된 앱은 이 명령을 실행하기 전에도 동작하고, 실행한 뒤부터 금액이 가려집니다.
+-- 아직 이 파일을 한 번도 실행하지 않은 데이터베이스에만 전체를 붙여 넣고 Run 하세요.
+-- 이미 실행했다면 다시 실행하지 말고 supabase-money-patch.sql 만 실행하세요.
+-- 금액 이전은 가계부에 이미 있는 금액을 덮어쓰지 않습니다.
 
 create extension if not exists pgcrypto with schema extensions;
 
@@ -24,9 +25,7 @@ select
 from public.orders
 where id <> '__settings_ledger_password__'
   and (order_data ? 'quoteAmount' or order_data ? 'paid')
-on conflict (id) do update
-set quote_amount = excluded.quote_amount,
-    paid = excluded.paid;
+on conflict (id) do nothing;
 
 create or replace function public.strip_order_money()
 returns trigger
@@ -47,6 +46,12 @@ create trigger orders_strip_money
   for each row
   execute function public.strip_order_money();
 
+update public.orders
+set order_data = order_data - 'quoteAmount' - 'paid'
+where id <> '__settings_ledger_password__'
+  and order_data is not null
+  and (order_data ? 'quoteAmount' or order_data ? 'paid');
+
 create or replace view public.orders_public as
 select
   id,
@@ -59,9 +64,16 @@ where id <> '__settings_ledger_password__';
 grant select on public.orders_public to anon, authenticated;
 
 drop policy if exists "Allow all for orders" on public.orders;
+drop policy if exists "orders_select" on public.orders;
 drop policy if exists "orders_insert" on public.orders;
 drop policy if exists "orders_update" on public.orders;
 drop policy if exists "orders_delete" on public.orders;
+
+create policy "orders_select"
+  on public.orders
+  for select
+  to anon, authenticated
+  using (id <> '__settings_ledger_password__');
 
 create policy "orders_insert"
   on public.orders
@@ -101,7 +113,7 @@ begin
     return pw = '1000';
   end if;
   if stored ~ '^[a-f0-9]{64}$' then
-    return stored = encode(extensions.digest(convert_to(pw, 'utf8'), 'sha256'), 'hex');
+    return stored = encode(sha256(convert_to(pw, 'utf8')), 'hex');
   end if;
   return stored = pw;
 end;
@@ -137,7 +149,7 @@ begin
     '1970-01-01',
     jsonb_build_object(
       'passwordHash',
-      encode(extensions.digest(convert_to(new_pw, 'utf8'), 'sha256'), 'hex')
+      encode(sha256(convert_to(new_pw, 'utf8')), 'hex')
     )
   )
   on conflict (id) do update
@@ -146,7 +158,16 @@ begin
 end;
 $$;
 
-create or replace function public.save_order_money(order_id text, amount numeric, is_paid boolean)
+drop function if exists public.save_order_money(text, numeric, boolean);
+drop function if exists public.save_order_money(text, numeric, boolean, boolean, boolean);
+
+create or replace function public.save_order_money(
+  order_id text,
+  amount numeric default null,
+  is_paid boolean default null,
+  touch_amount boolean default true,
+  touch_paid boolean default true
+)
 returns void
 language plpgsql
 security definer
@@ -159,11 +180,18 @@ begin
   if not exists (select 1 from public.orders where id = order_id) then
     raise exception 'missing order';
   end if;
+  if not touch_amount and not touch_paid then
+    return;
+  end if;
   insert into public.order_money (id, quote_amount, paid)
-  values (order_id, amount, coalesce(is_paid, false))
+  values (
+    order_id,
+    case when touch_amount then amount else null end,
+    case when touch_paid then coalesce(is_paid, false) else false end
+  )
   on conflict (id) do update
-  set quote_amount = excluded.quote_amount,
-      paid = excluded.paid;
+  set quote_amount = case when touch_amount then excluded.quote_amount else public.order_money.quote_amount end,
+      paid = case when touch_paid then excluded.paid else public.order_money.paid end;
 end;
 $$;
 
@@ -205,12 +233,12 @@ $$;
 revoke all on function public.ledger_password_ok(text) from public, anon, authenticated;
 revoke all on function public.check_ledger_password(text) from public;
 revoke all on function public.set_ledger_password(text, text) from public;
-revoke all on function public.save_order_money(text, numeric, boolean) from public;
+revoke all on function public.save_order_money(text, numeric, boolean, boolean, boolean) from public;
 revoke all on function public.fetch_ledger(text, text) from public;
 
 grant execute on function public.check_ledger_password(text) to anon, authenticated;
 grant execute on function public.set_ledger_password(text, text) to anon, authenticated;
-grant execute on function public.save_order_money(text, numeric, boolean) to anon, authenticated;
+grant execute on function public.save_order_money(text, numeric, boolean, boolean, boolean) to anon, authenticated;
 grant execute on function public.fetch_ledger(text, text) to anon, authenticated;
 
 notify pgrst, 'reload schema';

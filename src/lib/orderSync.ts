@@ -197,28 +197,37 @@ export function mergeMonthOrders(
   return Array.from(map.values()).sort((a, b) => orderDateKey(a).localeCompare(orderDateKey(b)) || a.id.localeCompare(b.id))
 }
 
-/** 금액은 별도 저장소에 둔다. 그 기능이 아직 없으면 발주서 안에 남긴다. */
-async function storeMoney(item: OrderListItem, dateKey: string): Promise<boolean> {
+export type MoneyWrite = {
+  quoteAmount?: number | null
+  paid?: boolean
+}
+
+/** 금액은 별도 저장소에 둔다. 넘긴 항목만 바꾸고, 빠뜨린 항목은 유지한다. */
+export async function saveOrderAmount(id: string, write: MoneyWrite): Promise<boolean> {
   if (!supabase) return true
-  const saved = await supabase.rpc('save_order_money', {
-    order_id: item.id,
-    amount: item.quoteAmount ?? null,
-    is_paid: !!item.paid,
+  const touchAmount = Object.prototype.hasOwnProperty.call(write, 'quoteAmount')
+  const touchPaid = Object.prototype.hasOwnProperty.call(write, 'paid')
+  if (!touchAmount && !touchPaid) return true
+  const partial = await supabase.rpc('save_order_money', {
+    order_id: id,
+    amount: touchAmount ? write.quoteAmount ?? null : null,
+    is_paid: touchPaid ? !!write.paid : false,
+    touch_amount: touchAmount,
+    touch_paid: touchPaid,
   })
-  if (!saved.error) return true
-  if (!isMissingApi(saved.error)) {
-    console.warn('[orderSync] money error', saved.error)
+  if (!partial.error) return true
+  if (!(isMissingApi(partial.error) && touchAmount && touchPaid)) {
+    console.warn('[orderSync] money error', partial.error)
     return false
   }
-  const { error } = await supabase
-    .from(TABLE)
-    .update({ order_data: orderPayload(item, dateKey, true) })
-    .eq('id', item.id)
-  if (error) {
-    console.warn('[orderSync] money fallback error', error)
-    return false
-  }
-  return true
+  const legacy = await supabase.rpc('save_order_money', {
+    order_id: id,
+    amount: write.quoteAmount ?? null,
+    is_paid: !!write.paid,
+  })
+  if (!legacy.error) return true
+  console.warn('[orderSync] money error', legacy.error)
+  return false
 }
 
 /** 발주서 한 건 저장. 서버 저장이 실패하면 false */
@@ -233,39 +242,27 @@ export async function insertOrder(dateKey: string, item: OrderListItem): Promise
     console.warn('[orderSync] insert error', error)
     return false
   }
-  return storeMoney(item, dateKey)
+  return saveOrderAmount(item.id, { quoteAmount: item.quoteAmount ?? null, paid: !!item.paid })
 }
 
 /** 견적 금액·입금 여부 등 발주서 내용 수정. 서버 저장이 실패하면 false */
 export async function updateOrder(item: OrderListItem, options?: { includeMoney?: boolean }): Promise<boolean> {
   if (!supabase) return true
   const dateKey = orderDateKey(item)
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from(TABLE)
     .update({
       date_key: dateKey,
       order_data: orderPayload(item, dateKey, false),
     })
     .eq('id', item.id)
-  if (error) {
+    .select('id')
+  if (error || !data?.length) {
     console.warn('[orderSync] update error', error)
     return false
   }
   if (options?.includeMoney === false) return true
-  return storeMoney(item, dateKey)
-}
-
-/** 가계부에서 금액과 입금 여부만 저장 */
-export async function saveOrderAmount(id: string, quoteAmount: number | null, paid: boolean): Promise<boolean> {
-  if (!supabase) return true
-  const saved = await supabase.rpc('save_order_money', {
-    order_id: id,
-    amount: quoteAmount,
-    is_paid: paid,
-  })
-  if (!saved.error) return true
-  console.warn('[orderSync] money error', saved.error)
-  return false
+  return saveOrderAmount(item.id, { quoteAmount: item.quoteAmount ?? null, paid: !!item.paid })
 }
 
 /** 서버에 발주서 표가 응답하는지 확인 */
@@ -281,8 +278,8 @@ export async function pingOrders(): Promise<boolean> {
 /** 발주서 한 건 삭제. 서버 삭제가 실패하면 false */
 export async function deleteOrder(id: string): Promise<boolean> {
   if (!supabase) return true
-  const { error } = await supabase.from(TABLE).delete().eq('id', id)
-  if (error) {
+  const { data, error } = await supabase.from(TABLE).delete().eq('id', id).select('id')
+  if (error || !data?.length) {
     console.warn('[orderSync] delete error', error)
     return false
   }
@@ -292,6 +289,6 @@ export async function deleteOrder(id: string): Promise<boolean> {
 /** 해당 날짜 발주서 전체 삭제 */
 export async function deleteAllForDate(dateKey: string): Promise<void> {
   if (!supabase) return
-  const { error } = await supabase.from(TABLE).delete().eq('date_key', dateKey)
+  const { error } = await supabase.from(TABLE).delete().eq('date_key', dateKey).select('id')
   if (error) console.warn('[orderSync] deleteAll error', error)
 }
