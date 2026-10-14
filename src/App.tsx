@@ -7,7 +7,7 @@ import { getLedgerPassword } from './lib/ledgerPassword'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
 import styles from './App.module.css'
 
-const ORDER_CHANNEL_OPTIONS = ['개별카카오톡방', '부부피오피카톡방', '플러스친구', '문자', '이메일', '기타']
+const ORDER_CHANNEL_OPTIONS = ['개별 카톡방', '오픈채팅 카톡방', '부부피오피 플러스친구', '문자', '이메일', '기타']
 
 const DELIVERY_DATE_OPTIONS = [
   { value: 'urgent', label: '당일/긴급', bold: true, red: true },
