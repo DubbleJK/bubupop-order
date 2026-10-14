@@ -1,5 +1,5 @@
-/** 현재 화면: 메인 | 주문방식별 상세 | 발주서 정리 */
-export type Screen = 'main' | 'pop' | 'sticker' | 'dtf' | 'cardbanner' | 'tshirt' | 'summary'
+/** 현재 화면: 메인 | 주문방식별 상세 | 발주서 정리 | 월별 가계부 */
+export type Screen = 'main' | 'pop' | 'sticker' | 'dtf' | 'cardbanner' | 'tshirt' | 'summary' | 'ledger'
 
 /** 주문방식 (메인에서 선택) */
 export type OrderType = 'pop' | 'sticker' | 'dtf' | 'businesscard' | 'banner' | 'tshirt'
@@ -66,6 +66,8 @@ export interface OrderBlock {
 
 export interface OrderListItem {
   id: string
+  /** 작성일 YYYY-MM-DD. 월별 가계부 기준 */
+  dateKey?: string
   ordererName: string
   orderChannel: string
   deliveryLabel: string
@@ -77,4 +79,10 @@ export interface OrderListItem {
   designImages: string[]
   memo: string
   orderBlocks: OrderBlock[]
+  /** 견적 금액. 발주서 인쇄에는 넣지 않는다 */
+  quoteAmount?: number | null
+  /** 입금 완료 여부 */
+  paid?: boolean
+  /** 작업을 끝내 인쇄 목록에서 뺀 발주서. 가계부 기록은 남는다 */
+  completed?: boolean
 }

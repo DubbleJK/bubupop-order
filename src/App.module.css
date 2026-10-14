@@ -809,8 +809,18 @@
   white-space: pre-wrap;
   font-size: 13px;
   line-height: 1.6;
-  margin: 0;
+  margin: 0 0 16px;
   text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.generateError {
+  color: #c00;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  text-align: center;
 }
 
 .labelBlockSummary {
@@ -875,12 +885,42 @@
 
 .orderListItem {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   justify-content: space-between;
   padding: 8px 0;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
-  gap: 12px;
+  gap: 8px 12px;
+}
+
+.orderListSummary {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  line-height: 1.45;
+}
+
+.orderListToggle {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.orderListDetail {
+  width: 100%;
+}
+
+.orderListDetail .orderPreview {
+  margin-bottom: 8px;
 }
 
 .orderListItemActions {
@@ -888,6 +928,39 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.orderListDoneBtn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid #0a6b0a;
+  border-radius: 6px;
+  background: var(--card);
+  color: #0a6b0a;
+  cursor: pointer;
+}
+
+.orderListDoneBtn:hover {
+  background: #e8f5e9;
+}
+
+.printCheck {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.printCheck input {
+  width: 18px;
+  height: 18px;
+}
+
+.orderListDate {
+  display: inline-block;
+  margin-right: 6px;
+  font-weight: 700;
+  color: var(--accent);
 }
 
 .orderListEditBtn {
@@ -943,6 +1016,230 @@
 .clearAllBtn:hover {
   background: #f5f5f5;
   color: var(--text);
+}
+
+.paidMark {
+  color: #0a6b0a;
+  font-weight: 700;
+}
+
+.unpaidMark {
+  color: #a15c00;
+  font-weight: 700;
+}
+
+.moneyBox {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 0 0 8px;
+  text-align: left;
+}
+
+.moneyAmount {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.moneyAmount input {
+  width: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  text-align: right;
+}
+
+.moneyPaid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.moneyNote {
+  width: 100%;
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.ledgerBtn {
+  margin-top: 28px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.ledgerBtn:hover {
+  background: #f3f7f4;
+}
+
+.ledgerPwBox {
+  width: 100%;
+  max-width: 320px;
+  margin: 16px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.ledgerPwBox input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.ledgerPwError {
+  margin: 0;
+  color: #c00;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ledgerPwActions {
+  display: flex;
+  gap: 8px;
+}
+
+.ledgerExcelRow {
+  display: flex;
+  justify-content: flex-end;
+  margin: 8px 0 4px;
+}
+
+.ledgerExcelBtn {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid #1d6f42;
+  border-radius: 8px;
+  background: #fff;
+  color: #1d6f42;
+  cursor: pointer;
+}
+
+.ledgerExcelBtn:hover {
+  background: #f3faf6;
+}
+
+.ledgerDetail {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.ledgerNote {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ledgerPwChange {
+  margin-top: 28px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.wrapperLedger {
+  max-width: 720px;
+  align-items: stretch;
+  text-align: left;
+}
+
+.ledgerTop {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.ledgerMonthRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 14px;
+}
+
+.ledgerMonthBtn {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  cursor: pointer;
+}
+
+.ledgerTotals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ledgerTotals div {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ledgerTotals span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ledgerDay {
+  margin-top: 18px;
+}
+
+.ledgerDay h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.ledgerList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ledgerList li {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.ledgerWho {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.ledgerWho span {
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 .orderListEmpty {
