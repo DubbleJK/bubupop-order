@@ -33,7 +33,8 @@ export function getDateKey(): string {
 function normalizeAmount(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string' && value.trim()) {
-    const n = Number(value.replace(/[^\d]/g, ''))
+    const matched = value.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/)
+    const n = matched ? Number(matched[0]) : Number.NaN
     return Number.isFinite(n) ? n : null
   }
   return null

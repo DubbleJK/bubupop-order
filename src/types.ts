@@ -1,8 +1,8 @@
 /** 현재 화면: 메인 | 주문방식별 상세 | 발주서 정리 | 월별 가계부 */
-export type Screen = 'main' | 'pop' | 'sticker' | 'dtf' | 'cardbanner' | 'tshirt' | 'summary' | 'ledger'
+export type Screen = 'main' | 'pop' | 'sticker' | 'dtf' | 'uv' | 'expense' | 'cardbanner' | 'tshirt' | 'summary' | 'ledger'
 
 /** 주문방식 (메인에서 선택) */
-export type OrderType = 'pop' | 'sticker' | 'dtf' | 'businesscard' | 'banner' | 'tshirt'
+export type OrderType = 'pop' | 'sticker' | 'dtf' | 'uv' | 'businesscard' | 'banner' | 'tshirt' | 'expense'
 
 export interface PopItem {
   size: string
@@ -27,6 +27,17 @@ export interface DtfItem {
   memo?: string
 }
 
+export interface UvItem {
+  size: string
+  quantity: number
+  memo?: string
+}
+
+export interface ExpenseItem {
+  content: string
+  amount: number
+}
+
 export interface CardBannerItem {
   size: string
   quantity: number
@@ -44,8 +55,11 @@ export interface TshirtItem {
   shirtTypeOther: string
   color: string
   colorOther: string
-  sizes: Record<string, number>
-  kidsSizes: KidsSizeEntry[]
+  /** 예전 사이즈 수량. 이미 저장된 발주서만 가진다. */
+  sizes?: Record<string, number>
+  kidsSizes?: KidsSizeEntry[]
+  /** 상담 후 정리한 사이즈 */
+  sizeMemo?: string
   memo?: string
 }
 
@@ -60,6 +74,8 @@ export interface OrderBlock {
   popItems?: PopItem[]
   stickerItems?: StickerItem[]
   dtfItems?: DtfItem[]
+  uvItems?: UvItem[]
+  expenseItem?: ExpenseItem
   cardBannerItems?: CardBannerItem[]
   tshirtItem?: TshirtItem
 }

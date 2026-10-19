@@ -1,21 +1,35 @@
 import type {
   CardBannerItem,
   DtfItem,
+  ExpenseItem,
   OrderBlock,
   OrderListItem,
   OrderType,
   PopItem,
   StickerItem,
   TshirtItem,
+  UvItem,
 } from '../types'
 
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   pop: 'POP',
   sticker: '스티커',
   dtf: 'DTF',
+  uv: 'UV출력물',
   businesscard: '명함',
   banner: '배너',
   tshirt: '티셔츠',
+  expense: '지출',
+}
+
+export function orderIsExpense(item: { orderType?: string; orderBlocks?: { orderType: string }[] }): boolean {
+  return item.orderType === 'expense' || (item.orderBlocks ?? []).some(block => block.orderType === 'expense')
+}
+
+/** 지출은 가계부에 마이너스로 남긴다. 입력은 양수로 받고, 0은 그대로 둔다. */
+export function signedExpenseAmount(amount: number): number {
+  if (!Number.isFinite(amount) || amount === 0) return 0
+  return -Math.abs(Math.round(amount))
 }
 
 const POP_CUSTOM_SIZE_VALUE = '직접 입력'
@@ -143,22 +157,40 @@ function rowFilled(detail: string, quantity: number, memo?: string): boolean {
   return hasDetail || quantity > 0 || !!memo?.trim()
 }
 
+function legacyTshirtSizeText(ti: TshirtItem): string {
+  const sizeParts = Object.entries(ti.sizes ?? {})
+    .filter(([, qty]) => qty > 0)
+    .map(([size, qty]) => `${size} ${qty}`)
+  const extraParts = (ti.kidsSizes ?? [])
+    .filter(entry => entry.size?.trim() || entry.quantity > 0)
+    .map(entry => `${entry.size?.trim() || '사이즈미입력'} ${entry.quantity || 0}`)
+  const parts = [...sizeParts]
+  if (extraParts.length) parts.push(`그외 ${extraParts.join(', ')}`)
+  return parts.join(', ')
+}
+
+/** 새 메모가 있으면 그 글이고, 없으면 예전 사이즈 수량을 한 줄로 되돌린다. */
+export function tshirtSizeNote(ti: TshirtItem): string {
+  return ti.sizeMemo?.trim() || legacyTshirtSizeText(ti)
+}
+
 function tshirtLines(ti: TshirtItem): { lines: string[]; total: number } {
   const typeLabel = ti.shirtType === '그외' ? ti.shirtTypeOther?.trim() || '그외' : ti.shirtType?.trim() || '미입력'
   const colorLabel = ti.color === '그외' ? ti.colorOther?.trim() || '그외' : ti.color?.trim() || '미입력'
-  const sizeParts = Object.entries(ti.sizes)
-    .filter(([, q]) => q > 0)
-    .map(([s, q]) => `${s} ${q}`)
-  const extraParts = (ti.kidsSizes ?? [])
-    .filter(k => k.size?.trim() || k.quantity > 0)
-    .map(k => `${k.size?.trim() || '사이즈미입력'} ${k.quantity || 0}`)
+  const wroteSize = !!ti.sizeMemo?.trim()
+  const sizeText = tshirtSizeNote(ti)
   const lines = [`종류 ${typeLabel}`, `색상 ${colorLabel}`]
-  lines.push(sizeParts.length ? `사이즈 ${sizeParts.join(', ')}` : '사이즈 미입력')
-  if (extraParts.length) lines.push(`그외 ${extraParts.join(', ')}`)
-  const total =
-    Object.values(ti.sizes).reduce((sum, q) => sum + (q > 0 ? q : 0), 0) +
-    (ti.kidsSizes ?? []).reduce((sum, k) => sum + (k.quantity > 0 ? k.quantity : 0), 0)
+  lines.push(sizeText ? `사이즈 ${sizeText}` : '사이즈 미입력')
+  const total = wroteSize
+    ? 0
+    : Object.values(ti.sizes ?? {}).reduce((sum, qty) => sum + (qty > 0 ? qty : 0), 0) +
+      (ti.kidsSizes ?? []).reduce((sum, entry) => sum + (entry.quantity > 0 ? entry.quantity : 0), 0)
   return { lines, total }
+}
+
+function expenseHasContent(item: ExpenseItem | undefined): boolean {
+  if (!item) return false
+  return !!item.content.trim() || item.amount > 0
 }
 
 function tshirtHasContent(ti: TshirtItem | undefined): boolean {
@@ -166,6 +198,7 @@ function tshirtHasContent(ti: TshirtItem | undefined): boolean {
   const { total } = tshirtLines(ti)
   return (
     total > 0 ||
+    !!ti.sizeMemo?.trim() ||
     !!ti.shirtType ||
     !!ti.color ||
     !!ti.memo?.trim() ||
@@ -193,6 +226,15 @@ export function compactBlock(block: OrderBlock): OrderBlock | null {
       rowFilled(simpleSize(item.size), item.quantity, item.memo)
     )
     return dtfItems.length ? { ...block, dtfItems } : null
+  }
+  if (block.orderType === 'uv') {
+    const uvItems = (block.uvItems ?? []).filter(item =>
+      rowFilled(simpleSize(item.size), item.quantity, item.memo)
+    )
+    return uvItems.length ? { ...block, uvItems } : null
+  }
+  if (block.orderType === 'expense' && block.expenseItem && expenseHasContent(block.expenseItem)) {
+    return { ...block, expenseItem: { content: block.expenseItem.content.trim(), amount: block.expenseItem.amount } }
   }
   if (block.orderType === 'businesscard' || block.orderType === 'banner') {
     const cardBannerItems = (block.cardBannerItems ?? []).filter(item =>
@@ -231,6 +273,24 @@ function rowsFromBlock(block: OrderBlock): SpecRow[] {
       memo: item.memo?.trim() || '',
     }))
   }
+  if (block.orderType === 'uv') {
+    return (block.uvItems ?? []).map((item: UvItem) => ({
+      category: ORDER_TYPE_LABELS.uv,
+      lines: [simpleSize(item.size)],
+      quantity: qtyText(item.quantity),
+      memo: item.memo?.trim() || '',
+    }))
+  }
+  if (block.orderType === 'expense' && block.expenseItem) {
+    return [
+      {
+        category: ORDER_TYPE_LABELS.expense,
+        lines: [block.expenseItem.content.trim() || '내용 없음'],
+        quantity: '',
+        memo: '',
+      },
+    ]
+  }
   if (block.orderType === 'businesscard' || block.orderType === 'banner') {
     const category = ORDER_TYPE_LABELS[block.orderType]
     return (block.cardBannerItems ?? []).map((item: CardBannerItem | DtfItem) => ({
@@ -246,7 +306,7 @@ function rowsFromBlock(block: OrderBlock): SpecRow[] {
       {
         category: '티셔츠',
         lines,
-        quantity: total > 0 ? String(total) : '미입력',
+        quantity: block.tshirtItem.sizeMemo?.trim() ? '' : total > 0 ? String(total) : '미입력',
         memo: block.tshirtItem.memo?.trim() || '',
       },
     ]
@@ -289,7 +349,9 @@ export function formatOrderText(input: OrderHeaderInput): string {
   } else {
     order.rows.forEach((row, i) => {
       lines.push(`${i + 1}. [${row.category}] ${row.lines.join(' / ')}`)
-      lines.push(`    수량 ${row.quantity}${row.memo ? `  ·  메모 ${row.memo}` : ''}`)
+      if (row.quantity || row.memo) {
+        lines.push(`    ${row.quantity ? `수량 ${row.quantity}` : ''}${row.memo ? `${row.quantity ? '  ·  ' : ''}메모 ${row.memo}` : ''}`)
+      }
     })
   }
   if (order.imageCount > 0) {
@@ -321,7 +383,8 @@ export function formatLedgerDetail(input: OrderHeaderInput & { fullText?: string
     ? order.rows
         .map((row, i) => {
           const memo = row.memo ? ` / 메모 ${row.memo}` : ''
-          return `${i + 1}. ${row.category} ${row.lines.join(' / ')} / 수량 ${row.quantity}${memo}`
+          const qty = row.quantity ? ` / 수량 ${row.quantity}` : ''
+          return `${i + 1}. ${row.category} ${row.lines.join(' / ')}${qty}${memo}`
         })
         .join('\n')
     : '품목 없음'

@@ -2,10 +2,10 @@ import { useState, useCallback, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOrder, updateOrder, saveOrderAmount, orderDateKey, mergeMonthOrders, pingOrders } from './lib/orderSync'
 import { getLedgerSession, matchesSharedLedgerPassword } from './lib/ledgerPassword'
-import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, formatOrderText, orderWrittenAt, resolveDelivery } from './lib/orderFormat'
+import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, formatOrderText, orderIsExpense, orderWrittenAt, resolveDelivery, signedExpenseAmount, tshirtSizeNote } from './lib/orderFormat'
 import { LedgerView, currentMonthKey, shiftMonth } from './LedgerView'
 import { shrinkDataUrl, shrinkDesignFile } from './lib/shrinkImage'
-import type { Screen, OrderType, PopItem, StickerItem, DtfItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
+import type { Screen, OrderType, PopItem, StickerItem, DtfItem, UvItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
 import styles from './App.module.css'
 
 const ORDER_CHANNEL_OPTIONS = ['개별 카톡방', '오픈채팅 카톡방', '부부피오피 플러스친구', '문자', '이메일', '기타']
@@ -33,8 +33,6 @@ const POP_OTHER_PRODUCT_VALUE = '기타제품'
 
 const STICKER_MATERIALS = ['모조지', '아트지', '유포지', '투명데드롱', 'pvc', '솔벤(코팅있음)', '솔벤(코팅없음)']
 
-const TSHIRT_SIZES = ['S(90)', 'M(95)', 'L(100)', 'XL(105)', '3XL(110)', '4XL(115)', '5XL(120)']
-
 const TSHIRT_TYPES = ['면', '기능성', '그외']
 const TSHIRT_COLORS = ['블랙', '화이트', '그외']
 
@@ -44,8 +42,7 @@ const initialTshirt: TshirtItem = {
   shirtTypeOther: '',
   color: '',
   colorOther: '',
-  sizes: Object.fromEntries(TSHIRT_SIZES.map(s => [s, 0])),
-  kidsSizes: [],
+  sizeMemo: '',
 }
 
 function App() {
@@ -59,10 +56,11 @@ function App() {
   const [popItems, setPopItems] = useState<PopItem[]>([])
   const [stickerItems, setStickerItems] = useState<StickerItem[]>([])
   const [dtfItems, setDtfItems] = useState<DtfItem[]>([])
+  const [uvItems, setUvItems] = useState<UvItem[]>([])
+  const [expenseContent, setExpenseContent] = useState('')
+  const [expenseAmount, setExpenseAmount] = useState('')
   const [cardBannerItems, setCardBannerItems] = useState<CardBannerItem[]>([])
   const [tshirtItem, setTshirtItem] = useState<TshirtItem>(initialTshirt)
-  const [kidsSizeInput, setKidsSizeInput] = useState('')
-  const [kidsSizeQtyInput, setKidsSizeQtyInput] = useState<number>(0)
 
   const [memo, setMemo] = useState('')
   const [orderList, setOrderList] = useState<OrderListItem[]>([])
@@ -115,6 +113,9 @@ function App() {
 
   const goToOrderDetail = useCallback((type: OrderType) => {
     setOrderType(type)
+    if (type === 'uv') {
+      setUvItems(prev => (prev.length ? prev : [{ size: '', quantity: 0 }]))
+    }
     setScreen(type === 'businesscard' || type === 'banner' ? 'cardbanner' : type)
   }, [])
 
@@ -128,8 +129,12 @@ function App() {
     if (orderType === 'pop') raw.popItems = [...popItems]
     if (orderType === 'sticker') raw.stickerItems = [...stickerItems]
     if (orderType === 'dtf') raw.dtfItems = [...dtfItems]
+    if (orderType === 'uv') raw.uvItems = [...uvItems]
+    if (orderType === 'expense') {
+      raw.expenseItem = { content: expenseContent.trim(), amount: Number(expenseAmount) || 0 }
+    }
     if (orderType === 'businesscard' || orderType === 'banner') raw.cardBannerItems = [...cardBannerItems]
-    if (orderType === 'tshirt') raw.tshirtItem = { ...tshirtItem, designImages: [...tshirtItem.designImages], kidsSizes: [...tshirtItem.kidsSizes] }
+    if (orderType === 'tshirt') raw.tshirtItem = { ...tshirtItem, designImages: [...tshirtItem.designImages] }
     const block = compactBlock(raw)
     if (!block) return
     if (editingPrependNextBlock) {
@@ -138,17 +143,18 @@ function App() {
     } else {
       setOrderBlocks(prev => [...prev, block])
     }
-  }, [orderType, popItems, stickerItems, dtfItems, cardBannerItems, tshirtItem, editingPrependNextBlock])
+  }, [orderType, popItems, stickerItems, dtfItems, uvItems, expenseContent, expenseAmount, cardBannerItems, tshirtItem, editingPrependNextBlock])
 
   const clearCurrentProductAndGoMain = useCallback(() => {
     pushCurrentToOrderBlocks()
     setPopItems([])
     setStickerItems([])
     setDtfItems([])
+    setUvItems([])
+    setExpenseContent('')
+    setExpenseAmount('')
     setCardBannerItems([])
     setTshirtItem(initialTshirt)
-    setKidsSizeInput('')
-    setKidsSizeQtyInput(0)
     goMain()
   }, [pushCurrentToOrderBlocks, goMain])
 
@@ -178,15 +184,18 @@ function App() {
     setDtfItems(prev => prev.map((item, idx) => (idx === i ? { ...item, [field]: value } : item)))
   }, [])
 
+  const addUvItem = useCallback(() => {
+    setUvItems(prev => [...prev, { size: '', quantity: 0 }])
+  }, [])
+  const updateUvItem = useCallback((i: number, field: keyof UvItem, value: string | number) => {
+    setUvItems(prev => prev.map((item, idx) => (idx === i ? { ...item, [field]: value } : item)))
+  }, [])
+
   const addCardBannerItem = useCallback(() => {
     setCardBannerItems(prev => [...prev, { size: '', quantity: 0 }])
   }, [])
   const updateCardBannerItem = useCallback((i: number, field: keyof CardBannerItem, value: string | number) => {
     setCardBannerItems(prev => prev.map((item, idx) => (idx === i ? { ...item, [field]: value } : item)))
-  }, [])
-
-  const updateTshirtSize = useCallback((size: string, qty: number) => {
-    setTshirtItem(prev => ({ ...prev, sizes: { ...prev.sizes, [size]: qty } }))
   }, [])
 
   const handleTshirtDesignUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -211,10 +220,11 @@ function App() {
     setPopItems([])
     setStickerItems([])
     setDtfItems([])
+    setUvItems([])
+    setExpenseContent('')
+    setExpenseAmount('')
     setCardBannerItems([])
     setTshirtItem(initialTshirt)
-    setKidsSizeInput('')
-    setKidsSizeQtyInput(0)
     setMemo('')
     setQuoteAmountInput('')
     setPaidNow(false)
@@ -230,6 +240,61 @@ function App() {
     clearDraft()
     setScreen('main')
   }, [clearDraft])
+
+  const saveExpense = useCallback(async () => {
+    if (savingOrder) return
+    const content = expenseContent.trim()
+    const amount = Number(expenseAmount)
+    if (!content) {
+      setFormError('지출 내용을 입력해 주세요.')
+      return
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFormError('지출 금액을 입력해 주세요.')
+      return
+    }
+    setFormError('')
+    setSavingOrder(true)
+    const block: OrderBlock = { orderType: 'expense', expenseItem: { content, amount } }
+    const dateKey = editingDateKey || getDateKey()
+    const newItem: OrderListItem = {
+      id: editingOrderId || Date.now().toString(),
+      ordererName: content,
+      orderChannel: '',
+      deliveryLabel: '',
+      deliveryDate: '',
+      deliveryDateOther: '',
+      orderProduct: ORDER_TYPE_LABELS.expense,
+      fullText: formatOrderText({
+        ordererName: content,
+        orderChannel: '',
+        deliveryDate: '',
+        deliveryDateOther: '',
+        memo: '',
+        orderBlocks: [block],
+      }),
+      orderType: 'expense',
+      designImages: [],
+      memo: '',
+      quoteAmount: signedExpenseAmount(amount),
+      paid: true,
+      completed: true,
+      dateKey,
+      orderBlocks: [block],
+    }
+    const ok = editingOrderId ? await updateOrder(newItem) : await insertOrder(dateKey, newItem)
+    setSavingOrder(false)
+    if (!ok) {
+      setFormError('서버에 저장하지 못했습니다. 다시 눌러 주세요.')
+      setSyncState('error')
+      return
+    }
+    setOrderList(prev => prev.filter(order => order.id !== newItem.id))
+    setListAddMessage('지출이 가계부에 마이너스로 기록되었습니다.')
+    setTimeout(() => setListAddMessage(''), 2500)
+    clearDraft()
+    setScreen('main')
+  }, [savingOrder, expenseContent, expenseAmount, editingDateKey, editingOrderId, clearDraft])
 
   const generateOrder = useCallback(async () => {
     if (savingOrder) return
@@ -283,12 +348,13 @@ function App() {
         popItems: b.popItems ? [...b.popItems] : undefined,
         stickerItems: b.stickerItems ? [...b.stickerItems] : undefined,
         dtfItems: b.dtfItems ? [...b.dtfItems] : undefined,
+        uvItems: b.uvItems ? [...b.uvItems] : undefined,
+        expenseItem: b.expenseItem ? { ...b.expenseItem } : undefined,
         cardBannerItems: b.cardBannerItems ? [...b.cardBannerItems] : undefined,
         tshirtItem: b.tshirtItem
           ? {
               ...b.tshirtItem,
               designImages: [...b.tshirtItem.designImages],
-              kidsSizes: [...b.tshirtItem.kidsSizes],
             }
           : undefined,
       })),
@@ -390,6 +456,9 @@ function App() {
     setSaveNotice('')
     setFormError('')
     setImageNotice('')
+    setUvItems([])
+    setExpenseContent('')
+    setExpenseAmount('')
 
     switch (first.orderType) {
       case 'pop':
@@ -419,6 +488,33 @@ function App() {
         setOrderType('dtf')
         setScreen('dtf')
         break
+      case 'uv':
+        setPopItems([])
+        setStickerItems([])
+        setDtfItems([])
+        setUvItems(first.uvItems?.length ? first.uvItems : [{ size: '', quantity: 0 }])
+        setCardBannerItems([])
+        setTshirtItem(initialTshirt)
+        setOrderType('uv')
+        setScreen('uv')
+        break
+      case 'expense':
+        setPopItems([])
+        setStickerItems([])
+        setDtfItems([])
+        setCardBannerItems([])
+        setTshirtItem(initialTshirt)
+        setExpenseContent(first.expenseItem?.content ?? '')
+        setExpenseAmount(
+          item.quoteAmount == null
+            ? first.expenseItem?.amount
+              ? String(Math.abs(first.expenseItem.amount))
+              : ''
+            : String(Math.abs(item.quoteAmount))
+        )
+        setOrderType('expense')
+        setScreen('expense')
+        break
       case 'businesscard':
       case 'banner':
         setPopItems([])
@@ -439,7 +535,9 @@ function App() {
             ? {
                 ...first.tshirtItem,
                 designImages: [...(first.tshirtItem.designImages ?? [])],
-                kidsSizes: [...(first.tshirtItem.kidsSizes ?? [])],
+                sizes: undefined,
+                kidsSizes: undefined,
+                sizeMemo: tshirtSizeNote(first.tshirtItem),
               }
             : initialTshirt
         )
@@ -447,8 +545,6 @@ function App() {
         setScreen('tshirt')
         break
     }
-    setKidsSizeInput('')
-    setKidsSizeQtyInput(0)
   }, [])
 
   const clearOrderList = useCallback(() => {
@@ -500,16 +596,20 @@ function App() {
   }, [])
 
   const saveOrderMoney = useCallback((item: OrderListItem, patch: { quoteAmount?: number | null; paid?: boolean }) => {
-    const next = { ...item, ...patch, dateKey: orderDateKey(item) }
-    return saveOrderAmount(item.id, patch).then(async saved => {
+    const nextPatch = { ...patch }
+    if (orderIsExpense(item) && typeof nextPatch.quoteAmount === 'number') {
+      nextPatch.quoteAmount = signedExpenseAmount(nextPatch.quoteAmount)
+    }
+    const next = { ...item, ...nextPatch, dateKey: orderDateKey(item) }
+    return saveOrderAmount(item.id, nextPatch).then(async saved => {
       const ok = saved || (await updateOrder(next, { includeMoney: true }))
       if (!ok) {
         setLedgerNotice('서버에 저장하지 못했습니다. 금액과 입금 표시는 이전 값으로 남습니다.')
         setSyncState('error')
         return false
       }
-      setOrderList(prev => prev.map(order => (order.id === item.id ? { ...order, ...patch, dateKey: next.dateKey } : order)))
-      setLedgerOrders(prev => prev.map(order => (order.id === item.id ? { ...order, ...patch, dateKey: next.dateKey } : order)))
+      setOrderList(prev => prev.map(order => (order.id === item.id ? { ...order, ...nextPatch, dateKey: next.dateKey } : order)))
+      setLedgerOrders(prev => prev.map(order => (order.id === item.id ? { ...order, ...nextPatch, dateKey: next.dateKey } : order)))
       return true
     })
   }, [])
@@ -1087,6 +1187,100 @@ function App() {
     )
   }
 
+  if (screen === 'uv') {
+    return (
+      <div className={`${styles.wrapper} ${styles.wrapperWide} ${styles.wrapperWithFixed}`}>
+        <div className={styles.fixedHeader}>
+          <button type="button" className={styles.backBtn} onClick={goMain}>← 메인화면</button>
+        </div>
+        <div className={styles.screenHeader}>
+          <h1 className={styles.screenTitle}>UV출력물</h1>
+        </div>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>사이즈</th>
+              <th>수량</th>
+              <th>메모</th>
+            </tr>
+          </thead>
+          <tbody>
+            {uvItems.map((item, i) => (
+              <tr key={i}>
+                <td>
+                  <input
+                    type="text"
+                    value={item.size}
+                    onChange={e => updateUvItem(i, 'size', e.target.value)}
+                    placeholder="사이즈"
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    min={0}
+                    value={item.quantity || ''}
+                    onChange={e => updateUvItem(i, 'quantity', Number(e.target.value) || 0)}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="text"
+                    placeholder="주문 상세"
+                    value={item.memo ?? ''}
+                    onChange={e => updateUvItem(i, 'memo', e.target.value)}
+                    className={styles.tableMemoInput}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button type="button" className={styles.addRowBtn} onClick={addUvItem}>+ 수량 추가</button>
+        <button type="button" className={styles.addItemBtn} onClick={clearCurrentProductAndGoMain}>주문품목 추가 하기</button>
+        <button type="button" className={`${styles.nextBtn} ${styles.nextBtnRed}`} onClick={goSummary}>다음으로</button>
+      </div>
+    )
+  }
+
+  if (screen === 'expense') {
+    return (
+      <div className={`${styles.wrapper} ${styles.wrapperWide} ${styles.wrapperWithFixed}`}>
+        <div className={styles.fixedHeader}>
+          <button type="button" className={styles.backBtn} onClick={goMain}>← 메인화면</button>
+        </div>
+        <div className={styles.screenHeader}>
+          <h1 className={styles.screenTitle}>지출</h1>
+        </div>
+        <p className={styles.hint}>인쇄 목록에는 들어가지 않습니다. 월별 가계부에 마이너스 금액으로 남습니다.</p>
+        {formError ? <p className={styles.ledgerPwError}>{formError}</p> : null}
+        <label className={styles.labelBlockSummary}>
+          <span className={styles.summaryLabel}>내용</span>
+          <textarea
+            value={expenseContent}
+            onChange={e => setExpenseContent(e.target.value)}
+            placeholder="어디에 썼는지 적어 주세요."
+            rows={4}
+          />
+        </label>
+        <label className={styles.labelBlockSummary}>
+          <span className={styles.summaryLabel}>금액</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            className={styles.input}
+            value={expenseAmount ? Number(expenseAmount).toLocaleString('ko-KR') : ''}
+            onChange={e => setExpenseAmount(e.target.value.replace(/[^\d]/g, ''))}
+            placeholder="숫자만 입력"
+          />
+        </label>
+        <button type="button" className={`${styles.nextBtn} ${styles.nextBtnRed}`} onClick={() => void saveExpense()} disabled={savingOrder}>
+          {savingOrder ? '저장 중' : '가계부에 기록'}
+        </button>
+      </div>
+    )
+  }
+
   if (screen === 'cardbanner') {
     return (
       <div className={`${styles.wrapper} ${styles.wrapperWide} ${styles.wrapperWithFixed}`}>
@@ -1212,84 +1406,15 @@ function App() {
           )}
         </div>
 
-        <div className={styles.sizeBlock}>
-          <span className={styles.sizeLabel}>티셔츠 사이즈</span>
-          <div className={styles.sizeGridVertical}>
-            {TSHIRT_SIZES.map(size => (
-              <label key={size} className={styles.sizeItemRow}>
-                <span className={styles.sizeItemLabel}>{size}</span>
-                <input
-                  type="number"
-                  min={0}
-                  placeholder="수량"
-                  value={tshirtItem.sizes[size] ?? ''}
-                  onChange={e => updateTshirtSize(size, Number(e.target.value) || 0)}
-                  className={styles.sizeItemInput}
-                />
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div className={`${styles.tshirtSection} ${styles.grEtcSizeSection}`}>
-          <span className={styles.sizeLabel}>그외 사이즈</span>
-          {tshirtItem.kidsSizes.length > 0 && (
-            <ul className={styles.kidsSizeList}>
-              {tshirtItem.kidsSizes.map((k, i) => (
-                <li key={i} className={styles.kidsSizeListItem}>
-                  <span>{k.size || '-'} / 수량 {k.quantity}</span>
-                  <button
-                    type="button"
-                    className={styles.kidsSizeRemoveBtn}
-                    onClick={() =>
-                      setTshirtItem(prev => ({
-                        ...prev,
-                        kidsSizes: prev.kidsSizes.filter((_, idx) => idx !== i),
-                      }))
-                    }
-                  >
-                    삭제
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className={styles.kidsSizeRow}>
-            <input
-              type="text"
-              placeholder="사이즈 입력 (예: 90, 95, 100...)"
-              value={kidsSizeInput}
-              onChange={e => setKidsSizeInput(e.target.value)}
-              className={styles.tshirtOtherInput}
-            />
-            <label className={styles.kidsSizeQtyLabel}>
-              <span>수량</span>
-              <input
-                type="number"
-                min={0}
-                value={kidsSizeQtyInput || ''}
-                onChange={e => setKidsSizeQtyInput(Number(e.target.value) || 0)}
-                className={styles.kidsSizeQtyInput}
-              />
-            </label>
-            <button
-              type="button"
-              className={styles.kidsSizeAddBtn}
-              onClick={() => {
-                if (kidsSizeInput.trim() || kidsSizeQtyInput > 0) {
-                  setTshirtItem(prev => ({
-                    ...prev,
-                    kidsSizes: [...prev.kidsSizes, { size: kidsSizeInput.trim(), quantity: kidsSizeQtyInput }],
-                  }))
-                  setKidsSizeInput('')
-                  setKidsSizeQtyInput(0)
-                }
-              }}
-            >
-              추가
-            </button>
-          </div>
-        </div>
+        <label className={styles.tshirtSizeMemo}>
+          <span>사이즈</span>
+          <textarea
+            placeholder="상담 후 사이즈와 수량을 정리해서 적으세요."
+            value={tshirtItem.sizeMemo ?? ''}
+            onChange={e => setTshirtItem(prev => ({ ...prev, sizeMemo: e.target.value }))}
+            rows={5}
+          />
+        </label>
 
         <label className={styles.tshirtMemoLabel}>
           <span>메모</span>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { formatLedgerDetail, orderWrittenAt } from './lib/orderFormat'
+import { formatLedgerDetail, orderIsExpense, orderWrittenAt } from './lib/orderFormat'
 import { matchesSharedLedgerPassword, writeSharedLedgerPassword } from './lib/ledgerPassword'
 import { orderDateKey } from './lib/orderSync'
 import { isSupabaseEnabled } from './lib/supabase'
@@ -70,7 +70,7 @@ function downloadLedgerExcel(monthKey: string, orders: OrderListItem[]) {
       detail.details,
       detail.note,
       item.quoteAmount ?? '',
-      item.paid ? '입금' : '미입금',
+      orderIsExpense(item) ? '지출' : item.paid ? '입금' : '미입금',
     ]
   })
   const rows = [header, ...body]
@@ -177,39 +177,46 @@ export function OrderMoneyFields({
   onSave: (patch: MoneyPatch) => void | boolean | Promise<boolean | void>
   showNote?: boolean
 }) {
-  const [text, setText] = useState(item.quoteAmount == null ? '' : String(item.quoteAmount))
+  const expense = orderIsExpense(item)
+  const [text, setText] = useState(item.quoteAmount == null ? '' : String(Math.abs(item.quoteAmount)))
 
   useEffect(() => {
-    setText(item.quoteAmount == null ? '' : String(item.quoteAmount))
+    setText(item.quoteAmount == null ? '' : String(Math.abs(item.quoteAmount)))
   }, [item.id, item.quoteAmount])
+
+  const shown = text ? (expense ? -Number(text) : Number(text)).toLocaleString('ko-KR') : ''
 
   return (
     <div className={styles.moneyBox}>
       <label className={styles.moneyAmount}>
-        <span>견적 금액</span>
+        <span>{expense ? '지출 금액' : '견적 금액'}</span>
         <input
           type="text"
           inputMode="numeric"
-          value={text ? Number(text).toLocaleString('ko-KR') : ''}
+          value={shown}
           onChange={e => setText(e.target.value.replace(/[^\d]/g, ''))}
           onBlur={() => {
-            const next = text ? Number(text) : null
+            const next = text ? (expense ? -Number(text) : Number(text)) : null
             if (next === (item.quoteAmount ?? null)) return
             void Promise.resolve(onSave({ quoteAmount: next })).then(ok => {
-              if (ok === false) setText(item.quoteAmount == null ? '' : String(item.quoteAmount))
+              if (ok === false) setText(item.quoteAmount == null ? '' : String(Math.abs(item.quoteAmount)))
             })
           }}
           placeholder="금액"
         />
       </label>
-      <label className={styles.moneyPaid}>
-        <input
-          type="checkbox"
-          checked={!!item.paid}
-          onChange={e => onSave({ paid: e.target.checked })}
-        />
-        <span>{item.paid ? '입금 완료' : '미입금'}</span>
-      </label>
+      {expense ? (
+        <span className={styles.moneyNote}>가계부에는 마이너스로 잡힙니다.</span>
+      ) : (
+        <label className={styles.moneyPaid}>
+          <input
+            type="checkbox"
+            checked={!!item.paid}
+            onChange={e => onSave({ paid: e.target.checked })}
+          />
+          <span>{item.paid ? '입금 완료' : '미입금'}</span>
+        </label>
+      )}
       {showNote ? <p className={styles.moneyNote}>발주서 인쇄에는 금액이 나오지 않습니다.</p> : null}
     </div>
   )
@@ -316,7 +323,10 @@ export function LedgerView({
                 <li key={item.id}>
                   <div className={styles.ledgerWho}>
                     <strong>{item.ordererName || '(주문자 없음)'}</strong>
-                    <span>{item.orderProduct || '품목 없음'} · {item.completed ? '처리 완료' : '인쇄 대기'}</span>
+                    <span>
+                      {item.orderProduct || '품목 없음'}
+                      {orderIsExpense(item) ? '' : ` · ${item.completed ? '처리 완료' : '인쇄 대기'}`}
+                    </span>
                   </div>
                   <pre className={styles.ledgerDetail}>{detail.details}</pre>
                   {detail.note ? <p className={styles.ledgerNote}>비고 {detail.note}</p> : null}
