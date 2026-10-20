@@ -45,6 +45,8 @@ export interface OrderHeaderInput {
   memo: string
   orderBlocks: OrderBlock[]
   writtenAt?: Date
+  /** 있으면 저장된 글을 바꾸지 않고, 이 날짜 기준으로 내일 수령만 다시 표시한다. */
+  asOf?: Date
 }
 
 export interface ResolvedDelivery {
@@ -120,6 +122,45 @@ export function resolveDelivery(
     return { shortLabel: text || '기타', display: text || '기타', urgent: false }
   }
   return { shortLabel: '', display: '', urgent: false }
+}
+
+function orderWrittenDay(item: { id: string; dateKey?: string }): Date {
+  if (item.dateKey && /^\d{4}-\d{2}-\d{2}$/.test(item.dateKey)) {
+    const [year, month, day] = item.dateKey.split('-').map(Number)
+    return new Date(year, month - 1, day)
+  }
+  return startOfDay(orderWrittenAt(item))
+}
+
+/**
+ * 저장된 수령 선택은 그대로 두고, 보는 날 기준으로만 표시를 만든다.
+ * 내일이 수령일에 닿거나 지났으면 화면과 인쇄에서만 당일/긴급으로 빨갛게 보인다.
+ */
+export function deliveryView(
+  item: {
+    id: string
+    dateKey?: string
+    deliveryDate: string
+    deliveryDateOther?: string
+    deliveryLabel?: string
+  },
+  now = new Date()
+): ResolvedDelivery {
+  const written = orderWrittenDay(item)
+  const base = resolveDelivery(item.deliveryDate, item.deliveryDateOther ?? '', written)
+  const stored = item.deliveryLabel?.trim()
+  if (item.deliveryDate !== 'tomorrow') {
+    return { ...base, display: stored || base.display }
+  }
+  const due = addDays(written, 1)
+  if (startOfDay(now).getTime() < due.getTime()) {
+    return { ...base, display: stored || base.display }
+  }
+  return {
+    shortLabel: '당일/긴급',
+    display: `당일/긴급 · ${formatKoreanDate(due)}`,
+    urgent: true,
+  }
 }
 
 function qtyText(n: number | undefined): string {
@@ -326,7 +367,17 @@ function compileOrder(input: OrderHeaderInput): CompiledOrder {
     writtenAt,
     ordererName: input.ordererName.trim(),
     orderChannel: input.orderChannel.trim(),
-    delivery: resolveDelivery(input.deliveryDate, input.deliveryDateOther, writtenAt),
+    delivery: input.asOf
+      ? deliveryView(
+          {
+            id: String(writtenAt.getTime()),
+            dateKey: `${writtenAt.getFullYear()}-${String(writtenAt.getMonth() + 1).padStart(2, '0')}-${String(writtenAt.getDate()).padStart(2, '0')}`,
+            deliveryDate: input.deliveryDate,
+            deliveryDateOther: input.deliveryDateOther,
+          },
+          input.asOf
+        )
+      : resolveDelivery(input.deliveryDate, input.deliveryDateOther, writtenAt),
     rows,
     penFill,
     imageCount,
@@ -446,8 +497,9 @@ function sheetHtml(item: OrderListItem, index: number, total: number): string {
   parts.push(
     `<tr><th>주문자</th><td>${escapeHtml(order.ordererName || '미입력')}</td><th>주문채널</th><td>${escapeHtml(order.orderChannel || '미입력')}</td></tr>`
   )
-  const deliveryClass = order.delivery.urgent ? ' class="urgent"' : ''
-  const deliveryText = order.delivery.display || item.deliveryLabel || '미입력'
+  const viewedDelivery = deliveryView(item)
+  const deliveryClass = viewedDelivery.urgent ? ' class="urgent"' : ''
+  const deliveryText = viewedDelivery.display || '미입력'
   parts.push(`<tr><th>수령</th><td colspan="3"${deliveryClass}>${escapeHtml(deliveryText)}</td></tr>`)
   parts.push('</table>')
 
