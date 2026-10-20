@@ -89,6 +89,8 @@ export interface OrderListItem {
   deliveryLabel: string
   deliveryDate: string
   deliveryDateOther: string
+  /** 수정에서 직접 고른 납기일. 없으면 작성일과 수령 선택으로 계산한다. */
+  dueDate?: string
   orderProduct: string
   fullText: string
   orderType: OrderType

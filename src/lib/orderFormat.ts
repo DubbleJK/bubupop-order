@@ -45,6 +45,8 @@ export interface OrderHeaderInput {
   memo: string
   orderBlocks: OrderBlock[]
   writtenAt?: Date
+  /** 수정에서 직접 고른 납기일 YYYY-MM-DD */
+  dueDate?: string
   /** 있으면 저장된 글을 바꾸지 않고, 이 날짜 기준으로 내일 수령만 다시 표시한다. */
   asOf?: Date
 }
@@ -124,12 +126,53 @@ export function resolveDelivery(
   return { shortLabel: '', display: '', urgent: false }
 }
 
+export function dateKeyFromDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function dateFromKey(key: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null
+  const [year, month, day] = key.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
 function orderWrittenDay(item: { id: string; dateKey?: string }): Date {
-  if (item.dateKey && /^\d{4}-\d{2}-\d{2}$/.test(item.dateKey)) {
-    const [year, month, day] = item.dateKey.split('-').map(Number)
-    return new Date(year, month - 1, day)
+  if (item.dateKey) {
+    const parsed = dateFromKey(item.dateKey)
+    if (parsed) return parsed
   }
   return startOfDay(orderWrittenAt(item))
+}
+
+/** 저장된 납기일이 있으면 그 날이고, 없으면 작성일과 수령 선택으로 계산한다. */
+export function scheduledDueDay(item: {
+  id: string
+  dateKey?: string
+  deliveryDate: string
+  dueDate?: string
+}): Date | null {
+  if (item.dueDate) {
+    const picked = dateFromKey(item.dueDate)
+    if (picked) return picked
+  }
+  const written = orderWrittenDay(item)
+  if (item.deliveryDate === 'urgent') return written
+  if (item.deliveryDate === 'tomorrow') return addDays(written, 1)
+  if (item.deliveryDate === 'thisWeek') return sundayOfWeek(written, 0)
+  if (item.deliveryDate === 'nextWeek') return sundayOfWeek(written, 1)
+  return null
+}
+
+/** 고른 납기일을 저장할 때 쓰는 문구. 화면의 빨간색은 보는 날에 따로 붙인다. */
+export function storedDueLabel(due: Date): string {
+  return `납기 · ${formatKoreanDate(due)}`
+}
+
+function dueDateLabel(due: Date, now: Date): ResolvedDelivery {
+  const arrived = startOfDay(now).getTime() >= startOfDay(due).getTime()
+  const date = formatKoreanDate(due)
+  if (arrived) return { shortLabel: '당일/긴급', display: `당일/긴급 · ${date}`, urgent: true }
+  return { shortLabel: '납기', display: `납기 · ${date}`, urgent: false }
 }
 
 /**
@@ -143,9 +186,14 @@ export function deliveryView(
     deliveryDate: string
     deliveryDateOther?: string
     deliveryLabel?: string
+    dueDate?: string
   },
   now = new Date()
 ): ResolvedDelivery {
+  if (item.dueDate) {
+    const picked = dateFromKey(item.dueDate)
+    if (picked) return dueDateLabel(picked, now)
+  }
   const written = orderWrittenDay(item)
   const base = resolveDelivery(item.deliveryDate, item.deliveryDateOther ?? '', written)
   const stored = item.deliveryLabel?.trim()
@@ -355,6 +403,26 @@ function rowsFromBlock(block: OrderBlock): SpecRow[] {
   return []
 }
 
+function shownDelivery(input: OrderHeaderInput, writtenAt: Date): ResolvedDelivery {
+  const picked = input.dueDate ? dateFromKey(input.dueDate) : null
+  if (picked) {
+    if (input.asOf) return dueDateLabel(picked, input.asOf)
+    return { shortLabel: '납기', display: storedDueLabel(picked), urgent: false }
+  }
+  if (input.asOf) {
+    return deliveryView(
+      {
+        id: String(writtenAt.getTime()),
+        dateKey: dateKeyFromDate(writtenAt),
+        deliveryDate: input.deliveryDate,
+        deliveryDateOther: input.deliveryDateOther,
+      },
+      input.asOf
+    )
+  }
+  return resolveDelivery(input.deliveryDate, input.deliveryDateOther, writtenAt)
+}
+
 function compileOrder(input: OrderHeaderInput): CompiledOrder {
   const writtenAt = input.writtenAt ?? new Date()
   const blocks = input.orderBlocks.map(compactBlock).filter((b): b is OrderBlock => b !== null)
@@ -367,17 +435,7 @@ function compileOrder(input: OrderHeaderInput): CompiledOrder {
     writtenAt,
     ordererName: input.ordererName.trim(),
     orderChannel: input.orderChannel.trim(),
-    delivery: input.asOf
-      ? deliveryView(
-          {
-            id: String(writtenAt.getTime()),
-            dateKey: `${writtenAt.getFullYear()}-${String(writtenAt.getMonth() + 1).padStart(2, '0')}-${String(writtenAt.getDate()).padStart(2, '0')}`,
-            deliveryDate: input.deliveryDate,
-            deliveryDateOther: input.deliveryDateOther,
-          },
-          input.asOf
-        )
-      : resolveDelivery(input.deliveryDate, input.deliveryDateOther, writtenAt),
+    delivery: shownDelivery(input, writtenAt),
     rows,
     penFill,
     imageCount,

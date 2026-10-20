@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOrder, updateOrder, saveOrderAmount, orderDateKey, mergeMonthOrders, pingOrders } from './lib/orderSync'
 import { getLedgerSession, matchesSharedLedgerPassword } from './lib/ledgerPassword'
-import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, deliveryView, formatOrderText, orderIsExpense, orderWrittenAt, resolveDelivery, signedExpenseAmount, tshirtSizeNote } from './lib/orderFormat'
+import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, dateFromKey, dateKeyFromDate, deliveryView, formatOrderText, orderIsExpense, orderWrittenAt, resolveDelivery, scheduledDueDay, signedExpenseAmount, storedDueLabel, tshirtSizeNote } from './lib/orderFormat'
 import { LedgerView, currentMonthKey, shiftMonth } from './LedgerView'
 import { shrinkDataUrl, shrinkDesignFile } from './lib/shrinkImage'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, UvItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
@@ -84,6 +84,9 @@ function App() {
   const [editingPrependNextBlock, setEditingPrependNextBlock] = useState(false)
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null)
   const [editingDateKey, setEditingDateKey] = useState<string | null>(null)
+  const [dueDateInput, setDueDateInput] = useState('')
+  const [originalDueDate, setOriginalDueDate] = useState('')
+  const [dueDateTouched, setDueDateTouched] = useState(false)
   const [amountTouched, setAmountTouched] = useState(false)
   const [paidTouched, setPaidTouched] = useState(false)
   const [savingOrder, setSavingOrder] = useState(false)
@@ -230,6 +233,9 @@ function App() {
     setPaidNow(false)
     setEditingOrderId(null)
     setEditingDateKey(null)
+    setDueDateInput('')
+    setOriginalDueDate('')
+    setDueDateTouched(false)
     setAmountTouched(false)
     setPaidTouched(false)
     setEditingPrependNextBlock(false)
@@ -298,7 +304,9 @@ function App() {
 
   const generateOrder = useCallback(async () => {
     if (savingOrder) return
-    const writtenAt = new Date()
+    const writtenAt = editingDateKey ? (dateFromKey(editingDateKey) ?? new Date()) : new Date()
+    const keptDue = editingOrderId ? (dueDateTouched ? dueDateInput.trim() : originalDueDate) : ''
+    const pickedDue = keptDue ? dateFromKey(keptDue) : null
     const blocks = orderBlocks.map(compactBlock).filter((b): b is OrderBlock => b !== null)
     if (blocks.length === 0) {
       setFormError('품목을 한 줄 이상 입력한 뒤 발주서를 생성해 주세요.')
@@ -313,7 +321,9 @@ function App() {
         return { ...block, tshirtItem: { ...block.tshirtItem, designImages } }
       })
     )
-    const delivery = resolveDelivery(deliveryDate, deliveryDateOther, writtenAt)
+    const delivery = pickedDue
+      ? { display: storedDueLabel(pickedDue) }
+      : resolveDelivery(deliveryDate, deliveryDateOther, writtenAt)
     const fullText = formatOrderText({
       ordererName,
       orderChannel,
@@ -322,6 +332,7 @@ function App() {
       memo,
       orderBlocks: prepared,
       writtenAt,
+      dueDate: pickedDue ? dateKeyFromDate(pickedDue) : undefined,
     })
     const productLabels = prepared.map(b => ORDER_TYPE_LABELS[b.orderType]).join(', ')
     const allDesignImages = prepared
@@ -343,6 +354,7 @@ function App() {
       quoteAmount: quoteAmountInput ? Number(quoteAmountInput) : null,
       paid: paidNow,
       dateKey,
+      dueDate: pickedDue ? dateKeyFromDate(pickedDue) : undefined,
       orderBlocks: prepared.map(b => ({
         ...b,
         popItems: b.popItems ? [...b.popItems] : undefined,
@@ -411,6 +423,9 @@ function App() {
     paidNow,
     editingOrderId,
     editingDateKey,
+    dueDateInput,
+    originalDueDate,
+    dueDateTouched,
     amountTouched,
     paidTouched,
     clearDraft,
@@ -444,6 +459,10 @@ function App() {
     setOrderChannel(item.orderChannel)
     setDeliveryDate(item.deliveryDate ?? '')
     setDeliveryDateOther(item.deliveryDateOther ?? '')
+    const scheduled = scheduledDueDay(item)
+    setDueDateInput(item.dueDate || (scheduled ? dateKeyFromDate(scheduled) : ''))
+    setOriginalDueDate(item.dueDate ?? '')
+    setDueDateTouched(false)
     setMemo(item.memo ?? '')
     setQuoteAmountInput(item.quoteAmount == null ? '' : String(item.quoteAmount))
     setPaidNow(!!item.paid)
@@ -660,6 +679,24 @@ function App() {
     return `${Number(month)}월 ${Number(day)}일`
   }
 
+  const keptDueKey = editingOrderId ? (dueDateTouched ? dueDateInput.trim() : originalDueDate) : ''
+
+  const dueDateEditor = editingOrderId ? (
+    <label className={styles.labelBlockSummary}>
+      <span className={styles.summaryLabel}>납기일</span>
+      <input
+        type="date"
+        className={styles.input}
+        value={dueDateInput}
+        onChange={e => {
+          setDueDateTouched(true)
+          setDueDateInput(e.target.value)
+        }}
+      />
+      <span className={styles.hint}>작성일과 가계부 날짜는 그대로 두고, 이 발주서의 납기일만 바꿉니다.</span>
+    </label>
+  ) : null
+
   if (screen === 'ledger') {
     return (
       <LedgerView
@@ -761,6 +798,7 @@ function App() {
               style={{ marginTop: 8 }}
             />
           )}
+          {dueDateEditor}
         </section>
 
         <section className={styles.section}>
@@ -790,6 +828,9 @@ function App() {
               deliveryDateOther,
               memo,
               orderBlocks,
+              writtenAt: editingDateKey ? (dateFromKey(editingDateKey) ?? undefined) : undefined,
+              dueDate: keptDueKey || undefined,
+              asOf: editingOrderId ? new Date() : undefined,
             })}</pre>
           </section>
         )}
@@ -865,6 +906,7 @@ function App() {
                                 memo: item.memo,
                                 orderBlocks: item.orderBlocks,
                                 writtenAt: orderWrittenAt(item),
+                                dueDate: item.dueDate,
                                 asOf: new Date(),
                               })
                             : item.fullText || '저장된 내용이 없습니다.'}
@@ -1448,6 +1490,8 @@ function App() {
           </button>
         </div>
 
+        {dueDateEditor}
+
         <label className={styles.labelBlockSummary}>
           <span className={styles.summaryLabel}>추가 지시 사항</span>
           <textarea
@@ -1488,6 +1532,9 @@ function App() {
           deliveryDateOther,
           memo,
           orderBlocks,
+          writtenAt: editingDateKey ? (dateFromKey(editingDateKey) ?? undefined) : undefined,
+          dueDate: keptDueKey || undefined,
+          asOf: editingOrderId ? new Date() : undefined,
         })}</pre>
         {formError ? <p className={styles.generateError}>{formError}</p> : null}
 
@@ -1569,6 +1616,7 @@ function App() {
                                 memo: item.memo,
                                 orderBlocks: item.orderBlocks,
                                 writtenAt: orderWrittenAt(item),
+                                dueDate: item.dueDate,
                                 asOf: new Date(),
                               })
                             : item.fullText || '저장된 내용이 없습니다.'}
@@ -1613,6 +1661,8 @@ function App() {
           </button>
         </div>
 
+        {dueDateEditor}
+
         <label className={styles.labelBlockSummary}>
           <span className={styles.summaryLabel}>추가 지시 사항</span>
           <textarea
@@ -1653,6 +1703,9 @@ function App() {
           deliveryDateOther,
           memo,
           orderBlocks,
+          writtenAt: editingDateKey ? (dateFromKey(editingDateKey) ?? undefined) : undefined,
+          dueDate: keptDueKey || undefined,
+          asOf: editingOrderId ? new Date() : undefined,
         })}</pre>
         {formError ? <p className={styles.generateError}>{formError}</p> : null}
 
@@ -1734,6 +1787,7 @@ function App() {
                                 memo: item.memo,
                                 orderBlocks: item.orderBlocks,
                                 writtenAt: orderWrittenAt(item),
+                                dueDate: item.dueDate,
                                 asOf: new Date(),
                               })
                             : item.fullText || '저장된 내용이 없습니다.'}
