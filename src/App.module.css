@@ -951,18 +951,20 @@
 }
 
 .orderListItem {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  justify-content: stretch;
   padding: 8px 0;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
-  gap: 8px 12px;
+  column-gap: 8px;
+  row-gap: 6px;
 }
 
 .orderListSummary {
-  flex: 1;
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
   padding: 0;
   border: none;
@@ -971,11 +973,42 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
-  line-height: 1.45;
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.orderListMain {
+  display: block;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.orderListDue,
+.orderListDueUrgent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 18px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.orderListDueUrgent {
+  color: #c00;
 }
 
 .orderListToggle {
   display: inline-block;
+  flex-shrink: 0;
   margin-left: 8px;
   font-size: 12px;
   font-weight: 600;
@@ -983,6 +1016,7 @@
 }
 
 .orderListDetail {
+  grid-column: 1 / -1;
   width: 100%;
 }
 
@@ -991,8 +1025,11 @@
 }
 
 .orderListItemActions {
+  grid-column: 2;
+  grid-row: 2;
   display: flex;
   align-items: center;
+  justify-self: end;
   gap: 8px;
   flex-shrink: 0;
 }
@@ -1013,8 +1050,12 @@
 }
 
 .printCheck {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   align-items: center;
+  align-self: start;
+  margin-top: 2px;
   flex-shrink: 0;
 }
 

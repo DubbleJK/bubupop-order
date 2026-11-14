@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOrder, updateOrder, saveOrderAmount, orderDateKey, mergeMonthOrders, pingOrders } from './lib/orderSync'
 import { getLedgerSession, matchesSharedLedgerPassword } from './lib/ledgerPassword'
-import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, dateFromKey, dateKeyFromDate, deliveryView, formatOrderText, orderIsExpense, orderWrittenAt, resolveDelivery, scheduledDueDay, signedExpenseAmount, storedDueLabel, tshirtSizeNote } from './lib/orderFormat'
+import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, dateFromKey, dateKeyFromDate, deliveryView, formatKoreanDate, formatOrderText, orderIsExpense, orderWrittenAt, resolveDelivery, scheduledDueDay, signedExpenseAmount, storedDueLabel, tshirtSizeNote } from './lib/orderFormat'
 import { LedgerView, currentMonthKey, shiftMonth } from './LedgerView'
 import { shrinkDataUrl, shrinkDesignFile } from './lib/shrinkImage'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, UvItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
@@ -679,6 +679,14 @@ function App() {
     return `${Number(month)}월 ${Number(day)}일`
   }
 
+  const dueLineOf = (item: OrderListItem) => {
+    const view = deliveryView(item)
+    const due = scheduledDueDay(item)
+    if (!due) return { text: view.display, urgent: view.urgent }
+    const date = formatKoreanDate(due).replace(/^\d{4}년\s*/, '')
+    return { text: `${view.urgent ? '당일/긴급' : '납기'} ${date}`, urgent: view.urgent }
+  }
+
   const keptDueKey = editingOrderId ? (dueDateTouched ? dueDateInput.trim() : originalDueDate) : ''
 
   const dueDateEditor = editingOrderId ? (
@@ -859,15 +867,15 @@ function App() {
                       aria-expanded={expandedOrderId === item.id}
                       onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
                     >
-                      <span className={styles.orderListDate}>{writtenLabel(item)}</span>
-                      {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
-                      {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
-                      {deliveryView(item).display ? (
-                        <span className={deliveryView(item).urgent ? styles.deliveryUrgent : undefined}>
-                          {' · '}{deliveryView(item).display}
-                        </span>
-                      ) : null}
-                      <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
+                      <span className={styles.orderListMain}>
+                        <span className={styles.orderListDate}>{writtenLabel(item)}</span>
+                        {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
+                        {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
+                      </span>
+                      <span className={dueLineOf(item).urgent ? styles.orderListDueUrgent : styles.orderListDue}>
+                        <span>{dueLineOf(item).text}</span>
+                        <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
+                      </span>
                     </button>
                     <span className={styles.orderListItemActions}>
                       {item.orderBlocks?.length > 0 && (
@@ -1569,15 +1577,15 @@ function App() {
                       aria-expanded={expandedOrderId === item.id}
                       onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
                     >
-                      <span className={styles.orderListDate}>{writtenLabel(item)}</span>
-                      {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
-                      {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
-                      {deliveryView(item).display ? (
-                        <span className={deliveryView(item).urgent ? styles.deliveryUrgent : undefined}>
-                          {' · '}{deliveryView(item).display}
-                        </span>
-                      ) : null}
-                      <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
+                      <span className={styles.orderListMain}>
+                        <span className={styles.orderListDate}>{writtenLabel(item)}</span>
+                        {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
+                        {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
+                      </span>
+                      <span className={dueLineOf(item).urgent ? styles.orderListDueUrgent : styles.orderListDue}>
+                        <span>{dueLineOf(item).text}</span>
+                        <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
+                      </span>
                     </button>
                     <span className={styles.orderListItemActions}>
                       {item.orderBlocks?.length > 0 && (
@@ -1740,15 +1748,15 @@ function App() {
                       aria-expanded={expandedOrderId === item.id}
                       onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
                     >
-                      <span className={styles.orderListDate}>{writtenLabel(item)}</span>
-                      {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
-                      {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
-                      {deliveryView(item).display ? (
-                        <span className={deliveryView(item).urgent ? styles.deliveryUrgent : undefined}>
-                          {' · '}{deliveryView(item).display}
-                        </span>
-                      ) : null}
-                      <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
+                      <span className={styles.orderListMain}>
+                        <span className={styles.orderListDate}>{writtenLabel(item)}</span>
+                        {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
+                        {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
+                      </span>
+                      <span className={dueLineOf(item).urgent ? styles.orderListDueUrgent : styles.orderListDue}>
+                        <span>{dueLineOf(item).text}</span>
+                        <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
+                      </span>
                     </button>
                     <span className={styles.orderListItemActions}>
                       {item.orderBlocks?.length > 0 && (
