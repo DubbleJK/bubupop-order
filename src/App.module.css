@@ -1034,6 +1034,108 @@
   flex-shrink: 0;
 }
 
+.orderListProofBtn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid #1c1917;
+  border-radius: 6px;
+  background: #1c1917;
+  color: #fff;
+  cursor: pointer;
+}
+
+.orderListProofBtn:hover {
+  background: #44403c;
+}
+
+.orderListProofBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.proofBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(28, 25, 23, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow: auto;
+}
+
+.proofDialog {
+  width: min(480px, 100%);
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 18px 18px;
+  text-align: left;
+}
+
+.proofTitle {
+  margin: 0;
+  font-size: 1.15rem;
+  text-align: center;
+}
+
+.proofHint,
+.proofNotice {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #57534e;
+  text-align: center;
+}
+
+.proofColumns {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.proofColumnBtn {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid #d6d3d1;
+  border-radius: 6px;
+  background: #fff;
+  color: #44403c;
+  cursor: pointer;
+}
+
+.proofColumnBtnOn {
+  background: #1c1917;
+  border-color: #1c1917;
+  color: #fff;
+}
+
+.proofColumnBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.proofActions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.proofFile {
+  display: none;
+}
+
+.proofPreview {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid #e7e5e4;
+}
+
 .orderListDoneBtn {
   flex-shrink: 0;
   padding: 4px 10px;

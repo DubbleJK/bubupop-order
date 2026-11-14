@@ -4,6 +4,7 @@ import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOr
 import { getLedgerSession, matchesSharedLedgerPassword } from './lib/ledgerPassword'
 import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, dateFromKey, dateKeyFromDate, deliveryView, formatKoreanDate, formatOrderText, orderIsExpense, orderWrittenAt, resolveDelivery, scheduledDueDay, signedExpenseAmount, storedDueLabel, tshirtSizeNote } from './lib/orderFormat'
 import { LedgerView, currentMonthKey, shiftMonth } from './LedgerView'
+import { ProofDialog } from './ProofDialog'
 import { shrinkDataUrl, shrinkDesignFile } from './lib/shrinkImage'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, UvItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
 import styles from './App.module.css'
@@ -64,6 +65,7 @@ function App() {
 
   const [memo, setMemo] = useState('')
   const [orderList, setOrderList] = useState<OrderListItem[]>([])
+  const [proofItem, setProofItem] = useState<OrderListItem | null>(null)
   const [listAddMessage, setListAddMessage] = useState('')
   const [formError, setFormError] = useState('')
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
@@ -705,6 +707,8 @@ function App() {
     </label>
   ) : null
 
+  const proofLayer = proofItem ? <ProofDialog item={proofItem} onClose={() => setProofItem(null)} /> : null
+
   if (screen === 'ledger') {
     return (
       <LedgerView
@@ -724,6 +728,7 @@ function App() {
   if (screen === 'main') {
     return (
       <div className={styles.wrapper}>
+        {proofLayer}
         <h1 className={styles.title}>발주서 발행기</h1>
         <p
           className={
@@ -878,6 +883,9 @@ function App() {
                       </span>
                     </button>
                     <span className={styles.orderListItemActions}>
+                      <button type="button" className={styles.orderListProofBtn} onClick={() => setProofItem(item)}>
+                        시안
+                      </button>
                       {item.orderBlocks?.length > 0 && (
                         <button
                           type="button"
@@ -1492,6 +1500,7 @@ function App() {
   if (screen === 'summary' && isSummaryA) {
     return (
       <div className={`${styles.wrapper} ${styles.wrapperWide} ${styles.wrapperWithFixed}`}>
+        {proofLayer}
         <div className={styles.fixedHeader}>
           <button type="button" className={styles.backBtn} onClick={() => setScreen(orderType === 'businesscard' || orderType === 'banner' ? 'cardbanner' : (orderType ?? 'main'))}>
             ← 이전
@@ -1588,6 +1597,9 @@ function App() {
                       </span>
                     </button>
                     <span className={styles.orderListItemActions}>
+                      <button type="button" className={styles.orderListProofBtn} onClick={() => setProofItem(item)}>
+                        시안
+                      </button>
                       {item.orderBlocks?.length > 0 && (
                         <button
                           type="button"
@@ -1663,6 +1675,7 @@ function App() {
   if (screen === 'summary' && isSummaryB) {
     return (
       <div className={`${styles.wrapper} ${styles.wrapperWide} ${styles.wrapperWithFixed}`}>
+        {proofLayer}
         <div className={styles.fixedHeader}>
           <button type="button" className={styles.backBtn} onClick={() => setScreen('tshirt')}>
             ← 이전
@@ -1759,6 +1772,9 @@ function App() {
                       </span>
                     </button>
                     <span className={styles.orderListItemActions}>
+                      <button type="button" className={styles.orderListProofBtn} onClick={() => setProofItem(item)}>
+                        시안
+                      </button>
                       {item.orderBlocks?.length > 0 && (
                         <button
                           type="button"
