@@ -70,7 +70,6 @@ interface CompiledOrder {
   orderChannel: string
   delivery: ResolvedDelivery
   rows: SpecRow[]
-  penFill: boolean
   imageCount: number
   memo: string
 }
@@ -427,7 +426,6 @@ function compileOrder(input: OrderHeaderInput): CompiledOrder {
   const writtenAt = input.writtenAt ?? new Date()
   const blocks = input.orderBlocks.map(compactBlock).filter((b): b is OrderBlock => b !== null)
   const rows = blocks.flatMap(rowsFromBlock)
-  const penFill = blocks.some(b => b.orderType === 'tshirt')
   const imageCount = blocks
     .filter(b => b.orderType === 'tshirt')
     .reduce((sum, b) => sum + (b.tshirtItem?.designImages?.length ?? 0), 0)
@@ -437,7 +435,6 @@ function compileOrder(input: OrderHeaderInput): CompiledOrder {
     orderChannel: input.orderChannel.trim(),
     delivery: shownDelivery(input, writtenAt),
     rows,
-    penFill,
     imageCount,
     memo: input.memo.trim(),
   }
@@ -471,13 +468,6 @@ export function formatOrderText(input: OrderHeaderInput): string {
     lines.push('')
     lines.push('[추가 지시]')
     lines.push(order.memo)
-  }
-  if (order.penFill) {
-    lines.push('')
-    lines.push('[티셔츠 출력 후 기입]')
-    lines.push('  앞  목 봉제선 아래 __________ cm')
-    lines.push('  뒤  목 봉제선 아래 __________ cm')
-    lines.push('  인쇄 가로 __________ cm')
   }
   return lines.join('\n')
 }
@@ -579,13 +569,6 @@ function sheetHtml(item: OrderListItem, index: number, total: number): string {
   if (order.memo) {
     parts.push('<section class="note"><h2>추가 지시</h2>')
     parts.push(`<p>${escapeHtml(order.memo).replace(/\n/g, '<br>')}</p></section>`)
-  }
-  if (order.penFill) {
-    parts.push('<section class="pen"><h2>티셔츠 출력 후 기입</h2><ul>')
-    parts.push('<li>앞 &nbsp; 목 봉제선 아래 __________ cm</li>')
-    parts.push('<li>뒤 &nbsp; 목 봉제선 아래 __________ cm</li>')
-    parts.push('<li>인쇄 가로 __________ cm</li>')
-    parts.push('</ul></section>')
   }
   if (images.length > 0) {
     parts.push('<section class="images"><h2>시안</h2>')

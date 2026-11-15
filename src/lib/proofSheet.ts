@@ -24,7 +24,7 @@ const PAD = 10
 const GAP = 8
 const FONT = '"Malgun Gothic", sans-serif'
 const TITLE = '시안확인용 이미지 입니다.'
-const CUT_NOTE = '빨간선은 재단선입니다'
+export const DEFAULT_CUT_NOTE = '빨간선은 재단선입니다'
 const NOTICE_TITLE = '시안 확인 안내'
 const NOTICE_BODY = [
   '디자인, 문구, 제작 크기 및 수량을 확인해 주세요.',
@@ -121,10 +121,10 @@ function rowsFromBlock(block: OrderBlock): ProofFact[][] {
   return []
 }
 
-function showsCutNote(item: OrderListItem): boolean {
-  const types = (item.orderBlocks ?? []).map(block => block.orderType).filter(type => type !== 'expense')
-  const kinds = types.length > 0 ? types : [item.orderType]
-  return kinds.some(type => type !== 'tshirt' && type !== 'dtf')
+export function proofDueText(item: OrderListItem): string {
+  const due = scheduledDueDay(item)
+  if (due) return formatKoreanDate(due).replace(/^\d{4}년\s*/, '')
+  return deliveryView(item).display
 }
 
 export function proofFacts(item: OrderListItem): ProofFact[] {
@@ -136,10 +136,46 @@ export function proofFacts(item: OrderListItem): ProofFact[] {
     groups.forEach(group => facts.push(...group))
   }
   if (item.memo?.trim()) pushRow(facts, '추가 지시', item.memo)
-  const due = scheduledDueDay(item)
-  const dueText = due ? formatKoreanDate(due).replace(/^\d{4}년\s*/, '') : deliveryView(item).display
-  if (dueText) facts.push({ label: '납기', value: dueText, red: true })
   return facts
+}
+
+export function proofFactsText(item: OrderListItem): string {
+  return proofFacts(item)
+    .map(fact => {
+      const [first, ...rest] = fact.value.split(/\r?\n/)
+      return [`${fact.label}: ${first ?? ''}`, ...rest].join('\n')
+    })
+    .join('\n')
+}
+
+export function factsFromText(text: string): ProofFact[] {
+  const facts: ProofFact[] = []
+  text.split(/\r?\n/).forEach(raw => {
+    const line = raw.replace(/\s+$/, '')
+    const match = line.match(/^([^:\n]{1,10}):\s?(.*)$/)
+    if (match && match[1].trim()) {
+      facts.push({ label: match[1].trim(), value: match[2] })
+      return
+    }
+    if (!line && facts.length === 0) return
+    if (facts.length === 0) {
+      facts.push({ label: '', value: line })
+      return
+    }
+    const current = facts[facts.length - 1]
+    current.value = current.value ? `${current.value}\n${line}` : line
+  })
+  return facts.filter(fact => fact.label || fact.value.trim())
+}
+
+export interface ProofOptions {
+  columns?: ProofColumns
+  showCutNote?: boolean
+  cutNote?: string
+  showDue?: boolean
+  dueText?: string
+  showFacts?: boolean
+  factsText?: string
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -226,32 +262,40 @@ function placeCaptures(captures: HTMLImageElement[], columns: ProofColumns, inne
 export async function renderProofSheet(
   item: OrderListItem,
   captures: HTMLImageElement[],
-  columns: ProofColumns = 1
+  options: ProofOptions = {}
 ): Promise<Blob> {
   if (captures.length === 0) throw new Error('capture')
+  const columns = options.columns ?? 1
   const logo = await loadLogo()
-  const facts = proofFacts(item)
+  const facts = options.showFacts === false
+    ? []
+    : factsFromText(options.factsText ?? proofFactsText(item))
+  const dueText = options.showDue ? (options.dueText ?? '').trim() : ''
+  if (dueText) facts.push({ label: '납기', value: dueText, red: true })
   const measure = document.createElement('canvas').getContext('2d')
   if (!measure) throw new Error('canvas')
 
-  const showCut = showsCutNote(item)
   const textWidth = SHEET_WIDTH - SIDE * 2
+  const cutText = options.showCutNote ? (options.cutNote ?? '').trim() : ''
+  measure.font = `600 20px ${FONT}`
+  const cutLines = cutText ? wrapText(measure, cutText, textWidth) : []
   measure.font = `400 18px ${FONT}`
   const noticeLines = NOTICE_BODY.map(line => wrapText(measure, line, textWidth))
   const valueMax = textWidth - 108
   measure.font = `600 20px ${FONT}`
-  const factLineGroups = facts.map(fact =>
-    fact.value.split(/\r?\n/).flatMap(line => {
+  const factLineGroups = facts.map(fact => {
+    const max = fact.label ? valueMax : textWidth
+    return fact.value.split(/\r?\n/).flatMap(line => {
       const text = line.trimEnd()
-      return text ? wrapText(measure, text, valueMax) : ['']
+      return text ? wrapText(measure, text, max) : ['']
     })
-  )
+  })
   const lineStep = 28
   const factHeights = factLineGroups.map(lines => lines.length * lineStep + 4)
   const { placed, panelH } = placeCaptures(captures, columns, textWidth)
   const logoH = logo ? 52 : 0
   const titleH = 40
-  const noteH = showCut ? 30 : 0
+  const noteH = cutLines.length * 28
   const noticeH = 30 + noticeLines.reduce((sum, lines) => sum + lines.length * 26 + 4, 0)
   const height =
     24 +
@@ -292,11 +336,13 @@ export async function renderProofSheet(
   ctx.fillText(TITLE, SHEET_WIDTH / 2, y + 16)
   y += titleH
 
-  if (showCut) {
+  if (cutLines.length > 0) {
     ctx.fillStyle = '#d10000'
     ctx.font = `600 20px ${FONT}`
-    ctx.fillText(CUT_NOTE, SHEET_WIDTH / 2, y + 12)
-    y += noteH
+    cutLines.forEach(line => {
+      ctx.fillText(line, SHEET_WIDTH / 2, y + 12)
+      y += 28
+    })
   }
 
   y += 8
@@ -313,14 +359,14 @@ export async function renderProofSheet(
   facts.forEach((fact, index) => {
     const lines = factLineGroups[index]
     lines.forEach((line, lineIndex) => {
-      if (lineIndex === 0) {
+      if (lineIndex === 0 && fact.label) {
         ctx.font = `500 18px ${FONT}`
         ctx.fillStyle = '#a8a29e'
         ctx.fillText(fact.label, SIDE, y + 12)
       }
       ctx.font = `600 20px ${FONT}`
       ctx.fillStyle = fact.red ? '#d10000' : '#44403c'
-      ctx.fillText(line, SIDE + labelWidth, y + 12)
+      ctx.fillText(line, fact.label ? SIDE + labelWidth : SIDE, y + 12)
       y += lineStep
     })
     y += 4

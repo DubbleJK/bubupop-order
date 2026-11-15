@@ -1089,6 +1089,47 @@
   text-align: center;
 }
 
+.proofOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.proofOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #44403c;
+}
+
+.proofOption input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.proofOption input[type='text'],
+.proofOption textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid #d6d3d1;
+  border-radius: 6px;
+  color: #1c1917;
+  background: #fff;
+  font-family: inherit;
+}
+
+.proofOption textarea {
+  min-height: 96px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
 .proofColumns {
   display: flex;
   justify-content: center;
