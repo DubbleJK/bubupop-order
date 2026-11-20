@@ -1,10 +1,12 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { supabase } from './lib/supabase'
 import { getDateKey, fetchOpenOrders, fetchOrdersForMonth, insertOrder, deleteOrder, updateOrder, saveOrderAmount, orderDateKey, mergeMonthOrders, pingOrders } from './lib/orderSync'
 import { getLedgerSession, matchesSharedLedgerPassword } from './lib/ledgerPassword'
-import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, dateFromKey, dateKeyFromDate, deliveryView, formatKoreanDate, formatOrderText, orderIsExpense, orderWrittenAt, resolveDelivery, scheduledDueDay, signedExpenseAmount, storedDueLabel, tshirtSizeNote } from './lib/orderFormat'
+import { ORDER_TYPE_LABELS, buildOrdersPrintHtml, compactBlock, dateFromKey, dateKeyFromDate, formatOrderText, orderIsExpense, resolveDelivery, scheduledDueDay, signedExpenseAmount, storedDueLabel, tshirtSizeNote } from './lib/orderFormat'
 import { LedgerView, currentMonthKey, shiftMonth } from './LedgerView'
+import { OrderQueues } from './OrderQueues'
 import { ProofDialog } from './ProofDialog'
+import { moveOrder } from './lib/orderLanes'
 import { shrinkDataUrl, shrinkDesignFile } from './lib/shrinkImage'
 import type { Screen, OrderType, PopItem, StickerItem, DtfItem, UvItem, CardBannerItem, TshirtItem, OrderListItem, OrderBlock } from './types'
 import styles from './App.module.css'
@@ -65,6 +67,8 @@ function App() {
 
   const [memo, setMemo] = useState('')
   const [orderList, setOrderList] = useState<OrderListItem[]>([])
+  const orderListRef = useRef(orderList)
+  orderListRef.current = orderList
   const [proofItem, setProofItem] = useState<OrderListItem | null>(null)
   const [listAddMessage, setListAddMessage] = useState('')
   const [formError, setFormError] = useState('')
@@ -341,6 +345,7 @@ function App() {
       .filter(b => b.orderType === 'tshirt')
       .flatMap(b => b.tshirtItem?.designImages ?? [])
     const dateKey = editingDateKey || getDateKey()
+    const previous = editingOrderId ? orderListRef.current.find(order => order.id === editingOrderId) : undefined
     const newItem: OrderListItem = {
       id: editingOrderId || Date.now().toString(),
       ordererName,
@@ -357,6 +362,8 @@ function App() {
       paid: paidNow,
       dateKey,
       dueDate: pickedDue ? dateKeyFromDate(pickedDue) : undefined,
+      listLane: previous?.listLane,
+      listRank: previous?.listRank,
       orderBlocks: prepared.map(b => ({
         ...b,
         popItems: b.popItems ? [...b.popItems] : undefined,
@@ -398,7 +405,7 @@ function App() {
         moneySaved
           ? '주문 내용을 서버에 저장하지 못했습니다. 금액 표시만 반영되었을 수 있습니다. 다시 눌러 주세요.'
           : editingOrderId
-            ? '서버에 저장하지 못했습니다. 인쇄 목록의 원래 발주서는 그대로입니다.'
+            ? '서버에 저장하지 못했습니다. 할일 목록의 원래 발주서는 그대로입니다.'
             : '서버에 저장하지 못했습니다. 다시 눌러 주세요.'
       )
       setSyncState('error')
@@ -570,7 +577,7 @@ function App() {
 
   const clearOrderList = useCallback(() => {
     if (orderList.length === 0) return
-    if (!window.confirm('인쇄 목록의 발주서를 모두 삭제할까요? 가계부에서도 지워집니다.')) return
+    if (!window.confirm('할일 목록과 최종 목록의 발주서를 모두 삭제할까요? 가계부에서도 지워집니다.')) return
     void Promise.all(orderList.map(async item => ({ id: item.id, ok: await deleteOrder(item.id) }))).then(results => {
       const failed = new Set(results.filter(result => !result.ok).map(result => result.id))
       setOrderList(prev => prev.filter(item => failed.has(item.id)))
@@ -581,7 +588,7 @@ function App() {
   }, [orderList])
 
   const completeOrder = useCallback((item: OrderListItem) => {
-    if (!window.confirm('인쇄 목록에서 뺄까요? 가계부 기록은 그대로 남습니다.')) return
+    if (!window.confirm('할일 목록에서 뺄까요? 가계부 기록은 그대로 남습니다.')) return
     const next = { ...item, completed: true, dateKey: orderDateKey(item) }
     void updateOrder(next, { includeMoney: false }).then(ok => {
       if (!ok) {
@@ -603,7 +610,7 @@ function App() {
 
   const removeLedgerOrder = useCallback((item: OrderListItem) => {
     const name = item.ordererName || '이 발주서'
-    if (!window.confirm(`${name} 건을 가계부에서 뺄까요? 반품·환불로 장부에서 지우고, 인쇄 목록에 남아 있어도 함께 사라집니다.`)) return
+    if (!window.confirm(`${name} 건을 가계부에서 뺄까요? 반품·환불로 장부에서 지우고, 할일 목록에 남아 있어도 함께 사라집니다.`)) return
     void deleteOrder(item.id).then(ok => {
       if (!ok) {
         setLedgerNotice('서버에 연결되지 않아 가계부에서 빼지 못했습니다.')
@@ -676,17 +683,21 @@ function App() {
     setSelectedOrderIds(allSelected ? [] : visibleIds)
   }
 
-  const writtenLabel = (item: OrderListItem) => {
-    const [, month, day] = orderDateKey(item).split('-')
-    return `${Number(month)}월 ${Number(day)}일`
-  }
-
-  const dueLineOf = (item: OrderListItem) => {
-    const view = deliveryView(item)
-    const due = scheduledDueDay(item)
-    if (!due) return { text: view.display, urgent: view.urgent }
-    const date = formatKoreanDate(due).replace(/^\d{4}년\s*/, '')
-    return { text: `${view.urgent ? '당일/긴급' : '납기'} ${date}`, urgent: view.urgent }
+  const moveOrderInLists = (id: string, lane: 'print' | 'final', index: number) => {
+    const prev = orderListRef.current
+    const next = moveOrder(prev, id, lane, index)
+    if (!next) return
+    setOrderList(next)
+    const changed = next.filter(item => {
+      const before = prev.find(order => order.id === item.id)
+      return !!before && (before.listLane !== item.listLane || before.listRank !== item.listRank)
+    })
+    void Promise.all(changed.map(item => updateOrder(item, { includeMoney: false }))).then(results => {
+      if (results.some(ok => !ok)) {
+        setSaveNotice('순서를 서버에 저장하지 못했습니다. 이 화면에서는 바뀐 순서로 보입니다.')
+        setSyncState('error')
+      }
+    })
   }
 
   const keptDueKey = editingOrderId ? (dueDateTouched ? dueDateInput.trim() : originalDueDate) : ''
@@ -848,112 +859,25 @@ function App() {
           </section>
         )}
 
-        <section className={styles.orderListSection}>
-          <h2 className={styles.sectionTitle}>인쇄 목록</h2>
-          <p className={styles.hint}>완료를 누르기 전에는 다음 날에도 남습니다. 출력은 체크한 건만 됩니다.</p>
-          {saveNotice ? <p className={styles.ledgerPwError}>{saveNotice}</p> : null}
-          {orderList.length === 0 ? (
-            <p className={styles.orderListEmpty}>완료하지 않은 발주서가 없습니다.</p>
-          ) : (
-            <>
-              <ul className={styles.orderList}>
-                {orderList.map((item, i) => (
-                  <li key={item.id} className={styles.orderListItem}>
-                    <label className={styles.printCheck}>
-                      <input
-                        type="checkbox"
-                        checked={selectedOrderIds.includes(item.id)}
-                        onChange={() => toggleSelected(item.id)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className={styles.orderListSummary}
-                      aria-expanded={expandedOrderId === item.id}
-                      onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
-                    >
-                      <span className={styles.orderListMain}>
-                        <span className={styles.orderListDate}>{writtenLabel(item)}</span>
-                        {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
-                        {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
-                      </span>
-                      <span className={dueLineOf(item).urgent ? styles.orderListDueUrgent : styles.orderListDue}>
-                        <span>{dueLineOf(item).text}</span>
-                        <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
-                      </span>
-                    </button>
-                    <span className={styles.orderListItemActions}>
-                      <button type="button" className={styles.orderListProofBtn} onClick={() => setProofItem(item)}>
-                        시안
-                      </button>
-                      {item.orderBlocks?.length > 0 && (
-                        <button
-                          type="button"
-                          className={styles.orderListEditBtn}
-                          onClick={() => startEditOrder(item)}
-                        >
-                          수정
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={styles.orderListDoneBtn}
-                        onClick={() => completeOrder(item)}
-                      >
-                        완료
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.orderListDeleteBtn}
-                        onClick={() => removeOrderFromList(item.id)}
-                      >
-                        삭제
-                      </button>
-                    </span>
-                    {expandedOrderId === item.id && (
-                      <div className={styles.orderListDetail}>
-                        <pre className={styles.orderPreview}>
-                          {item.orderBlocks?.length
-                            ? formatOrderText({
-                                ordererName: item.ordererName,
-                                orderChannel: item.orderChannel,
-                                deliveryDate: item.deliveryDate,
-                                deliveryDateOther: item.deliveryDateOther,
-                                memo: item.memo,
-                                orderBlocks: item.orderBlocks,
-                                writtenAt: orderWrittenAt(item),
-                                dueDate: item.dueDate,
-                                asOf: new Date(),
-                              })
-                            : item.fullText || '저장된 내용이 없습니다.'}
-                        </pre>
-                        {(item.designImages ?? []).length > 0 && (
-                          <div className={styles.imagePreview}>
-                            {item.designImages.map((src, imgIndex) => (
-                              <img key={imgIndex} src={src} alt={`시안 ${imgIndex + 1}`} className={styles.thumb} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <div className={styles.orderListActions}>
-                <button type="button" className={styles.clearAllBtn} onClick={toggleSelectAll}>
-                  {allSelected ? '선택 해제' : '전체 선택'}
-                </button>
-                <button type="button" className={styles.pdfBtn} onClick={openPrintView}>
-                  선택 항목 출력
-                </button>
-                <button type="button" className={styles.clearAllBtn} onClick={clearOrderList}>
-                  전체 삭제
-                </button>
-              </div>
-              {printNotice ? <p className={styles.ledgerPwError}>{printNotice}</p> : null}
-            </>
-          )}
-        </section>
+        <OrderQueues
+          orders={orderList}
+          selectedIds={selectedOrderIds}
+          expandedId={expandedOrderId}
+          editingId={editingOrderId}
+          saveNotice={saveNotice}
+          printNotice={printNotice}
+          allSelected={allSelected}
+          onToggleSelected={toggleSelected}
+          onToggleExpanded={id => setExpandedOrderId(prev => (prev === id ? null : id))}
+          onProof={setProofItem}
+          onEdit={startEditOrder}
+          onComplete={completeOrder}
+          onDelete={removeOrderFromList}
+          onToggleSelectAll={toggleSelectAll}
+          onPrint={openPrintView}
+          onClear={clearOrderList}
+          onMove={moveOrderInLists}
+        />
 
         {askLedgerPw ? (
           <form
@@ -1311,7 +1235,7 @@ function App() {
         <div className={styles.screenHeader}>
           <h1 className={styles.screenTitle}>지출</h1>
         </div>
-        <p className={styles.hint}>인쇄 목록에는 들어가지 않습니다. 월별 가계부에 마이너스 금액으로 남습니다.</p>
+        <p className={styles.hint}>할일 목록에는 들어가지 않습니다. 월별 가계부에 마이너스 금액으로 남습니다.</p>
         {formError ? <p className={styles.ledgerPwError}>{formError}</p> : null}
         <label className={styles.labelBlockSummary}>
           <span className={styles.summaryLabel}>내용</span>
@@ -1562,112 +1486,25 @@ function App() {
         </div>
         {listAddMessage ? <p className={styles.listAddMessage}>{listAddMessage}</p> : null}
 
-        <section className={styles.orderListSection}>
-          <h2 className={styles.sectionTitle}>인쇄 목록</h2>
-          <p className={styles.hint}>완료를 누르기 전에는 다음 날에도 남습니다. 출력은 체크한 건만 됩니다.</p>
-          {saveNotice ? <p className={styles.ledgerPwError}>{saveNotice}</p> : null}
-          {orderList.length === 0 ? (
-            <p className={styles.orderListEmpty}>완료하지 않은 발주서가 없습니다.</p>
-          ) : (
-            <>
-              <ul className={styles.orderList}>
-                {orderList.map((item, i) => (
-                  <li key={item.id} className={styles.orderListItem}>
-                    <label className={styles.printCheck}>
-                      <input
-                        type="checkbox"
-                        checked={selectedOrderIds.includes(item.id)}
-                        onChange={() => toggleSelected(item.id)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className={styles.orderListSummary}
-                      aria-expanded={expandedOrderId === item.id}
-                      onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
-                    >
-                      <span className={styles.orderListMain}>
-                        <span className={styles.orderListDate}>{writtenLabel(item)}</span>
-                        {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
-                        {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
-                      </span>
-                      <span className={dueLineOf(item).urgent ? styles.orderListDueUrgent : styles.orderListDue}>
-                        <span>{dueLineOf(item).text}</span>
-                        <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
-                      </span>
-                    </button>
-                    <span className={styles.orderListItemActions}>
-                      <button type="button" className={styles.orderListProofBtn} onClick={() => setProofItem(item)}>
-                        시안
-                      </button>
-                      {item.orderBlocks?.length > 0 && (
-                        <button
-                          type="button"
-                          className={styles.orderListEditBtn}
-                          onClick={() => startEditOrder(item)}
-                        >
-                          수정
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={styles.orderListDoneBtn}
-                        onClick={() => completeOrder(item)}
-                      >
-                        완료
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.orderListDeleteBtn}
-                        onClick={() => removeOrderFromList(item.id)}
-                      >
-                        삭제
-                      </button>
-                    </span>
-                    {expandedOrderId === item.id && (
-                      <div className={styles.orderListDetail}>
-                        <pre className={styles.orderPreview}>
-                          {item.orderBlocks?.length
-                            ? formatOrderText({
-                                ordererName: item.ordererName,
-                                orderChannel: item.orderChannel,
-                                deliveryDate: item.deliveryDate,
-                                deliveryDateOther: item.deliveryDateOther,
-                                memo: item.memo,
-                                orderBlocks: item.orderBlocks,
-                                writtenAt: orderWrittenAt(item),
-                                dueDate: item.dueDate,
-                                asOf: new Date(),
-                              })
-                            : item.fullText || '저장된 내용이 없습니다.'}
-                        </pre>
-                        {(item.designImages ?? []).length > 0 && (
-                          <div className={styles.imagePreview}>
-                            {item.designImages.map((src, imgIndex) => (
-                              <img key={imgIndex} src={src} alt={`시안 ${imgIndex + 1}`} className={styles.thumb} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <div className={styles.orderListActions}>
-                <button type="button" className={styles.clearAllBtn} onClick={toggleSelectAll}>
-                  {allSelected ? '선택 해제' : '전체 선택'}
-                </button>
-                <button type="button" className={styles.pdfBtn} onClick={openPrintView}>
-                  선택 항목 출력
-                </button>
-                <button type="button" className={styles.clearAllBtn} onClick={clearOrderList}>
-                  전체 삭제
-                </button>
-              </div>
-              {printNotice ? <p className={styles.ledgerPwError}>{printNotice}</p> : null}
-            </>
-          )}
-        </section>
+        <OrderQueues
+          orders={orderList}
+          selectedIds={selectedOrderIds}
+          expandedId={expandedOrderId}
+          editingId={editingOrderId}
+          saveNotice={saveNotice}
+          printNotice={printNotice}
+          allSelected={allSelected}
+          onToggleSelected={toggleSelected}
+          onToggleExpanded={id => setExpandedOrderId(prev => (prev === id ? null : id))}
+          onProof={setProofItem}
+          onEdit={startEditOrder}
+          onComplete={completeOrder}
+          onDelete={removeOrderFromList}
+          onToggleSelectAll={toggleSelectAll}
+          onPrint={openPrintView}
+          onClear={clearOrderList}
+          onMove={moveOrderInLists}
+        />
       </div>
     )
   }
@@ -1737,112 +1574,25 @@ function App() {
         </div>
         {listAddMessage ? <p className={styles.listAddMessage}>{listAddMessage}</p> : null}
 
-        <section className={styles.orderListSection}>
-          <h2 className={styles.sectionTitle}>인쇄 목록</h2>
-          <p className={styles.hint}>완료를 누르기 전에는 다음 날에도 남습니다. 출력은 체크한 건만 됩니다.</p>
-          {saveNotice ? <p className={styles.ledgerPwError}>{saveNotice}</p> : null}
-          {orderList.length === 0 ? (
-            <p className={styles.orderListEmpty}>완료하지 않은 발주서가 없습니다.</p>
-          ) : (
-            <>
-              <ul className={styles.orderList}>
-                {orderList.map((item, i) => (
-                  <li key={item.id} className={styles.orderListItem}>
-                    <label className={styles.printCheck}>
-                      <input
-                        type="checkbox"
-                        checked={selectedOrderIds.includes(item.id)}
-                        onChange={() => toggleSelected(item.id)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className={styles.orderListSummary}
-                      aria-expanded={expandedOrderId === item.id}
-                      onClick={() => setExpandedOrderId(prev => (prev === item.id ? null : item.id))}
-                    >
-                      <span className={styles.orderListMain}>
-                        <span className={styles.orderListDate}>{writtenLabel(item)}</span>
-                        {editingOrderId === item.id ? <span className={styles.editMark}>수정 중</span> : null}
-                        {i + 1}. {item.ordererName || '(주문자 없음)'} - {item.orderProduct}
-                      </span>
-                      <span className={dueLineOf(item).urgent ? styles.orderListDueUrgent : styles.orderListDue}>
-                        <span>{dueLineOf(item).text}</span>
-                        <span className={styles.orderListToggle}>{expandedOrderId === item.id ? '접기' : '보기'}</span>
-                      </span>
-                    </button>
-                    <span className={styles.orderListItemActions}>
-                      <button type="button" className={styles.orderListProofBtn} onClick={() => setProofItem(item)}>
-                        시안
-                      </button>
-                      {item.orderBlocks?.length > 0 && (
-                        <button
-                          type="button"
-                          className={styles.orderListEditBtn}
-                          onClick={() => startEditOrder(item)}
-                        >
-                          수정
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={styles.orderListDoneBtn}
-                        onClick={() => completeOrder(item)}
-                      >
-                        완료
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.orderListDeleteBtn}
-                        onClick={() => removeOrderFromList(item.id)}
-                      >
-                        삭제
-                      </button>
-                    </span>
-                    {expandedOrderId === item.id && (
-                      <div className={styles.orderListDetail}>
-                        <pre className={styles.orderPreview}>
-                          {item.orderBlocks?.length
-                            ? formatOrderText({
-                                ordererName: item.ordererName,
-                                orderChannel: item.orderChannel,
-                                deliveryDate: item.deliveryDate,
-                                deliveryDateOther: item.deliveryDateOther,
-                                memo: item.memo,
-                                orderBlocks: item.orderBlocks,
-                                writtenAt: orderWrittenAt(item),
-                                dueDate: item.dueDate,
-                                asOf: new Date(),
-                              })
-                            : item.fullText || '저장된 내용이 없습니다.'}
-                        </pre>
-                        {(item.designImages ?? []).length > 0 && (
-                          <div className={styles.imagePreview}>
-                            {item.designImages.map((src, imgIndex) => (
-                              <img key={imgIndex} src={src} alt={`시안 ${imgIndex + 1}`} className={styles.thumb} />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <div className={styles.orderListActions}>
-                <button type="button" className={styles.clearAllBtn} onClick={toggleSelectAll}>
-                  {allSelected ? '선택 해제' : '전체 선택'}
-                </button>
-                <button type="button" className={styles.pdfBtn} onClick={openPrintView}>
-                  선택 항목 출력
-                </button>
-                <button type="button" className={styles.clearAllBtn} onClick={clearOrderList}>
-                  전체 삭제
-                </button>
-              </div>
-              {printNotice ? <p className={styles.ledgerPwError}>{printNotice}</p> : null}
-            </>
-          )}
-        </section>
+        <OrderQueues
+          orders={orderList}
+          selectedIds={selectedOrderIds}
+          expandedId={expandedOrderId}
+          editingId={editingOrderId}
+          saveNotice={saveNotice}
+          printNotice={printNotice}
+          allSelected={allSelected}
+          onToggleSelected={toggleSelected}
+          onToggleExpanded={id => setExpandedOrderId(prev => (prev === id ? null : id))}
+          onProof={setProofItem}
+          onEdit={startEditOrder}
+          onComplete={completeOrder}
+          onDelete={removeOrderFromList}
+          onToggleSelectAll={toggleSelectAll}
+          onPrint={openPrintView}
+          onClear={clearOrderList}
+          onMove={moveOrderInLists}
+        />
       </div>
     )
   }

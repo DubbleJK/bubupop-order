@@ -103,4 +103,8 @@ export interface OrderListItem {
   paid?: boolean
   /** 작업을 끝내 인쇄 목록에서 뺀 발주서. 가계부 기록은 남는다 */
   completed?: boolean
+  /** 인쇄 목록 또는 나중에 볼 최종 목록 */
+  listLane?: 'print' | 'final'
+  /** 같은 목록 안에서의 순서. 작을수록 위 */
+  listRank?: number
 }
