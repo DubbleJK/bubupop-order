@@ -1,7 +1,7 @@
 .wrapper {
   background: var(--card);
   border-radius: 12px;
-  padding: 28px 24px;
+  padding: 28px 24px 76px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   border: 1px solid var(--border);
   max-width: 440px;
@@ -1370,6 +1370,149 @@
   font-size: 12px;
   color: var(--text-muted);
   font-weight: 500;
+}
+
+.phraseDockBtn {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 60;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 999px;
+  background: #1c1917;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 6px 16px rgba(28, 25, 23, 0.28);
+  cursor: pointer;
+}
+
+.phraseBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(28, 25, 23, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.phraseSheet {
+  width: min(480px, 100%);
+  max-height: min(82vh, 720px);
+  overflow: auto;
+  background: #fff;
+  border-radius: 16px 16px 0 0;
+  padding: 16px 16px 28px;
+  text-align: left;
+}
+
+.phraseSheetHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.phraseSheetTitle {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.phraseNotice {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #0a6b0a;
+}
+
+.phraseAddBtn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px dashed #a8a29e;
+  border-radius: 8px;
+  background: #fff;
+  color: #1c1917;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.phraseList {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.phraseItem {
+  padding: 10px 0;
+  border-bottom: 1px solid #a8a29e;
+}
+
+.phraseCopy {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phraseItemTitle {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1c1917;
+}
+
+.phraseItemPreview {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #78716c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.phraseRowActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.phraseEditor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.phraseField {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #44403c;
+}
+
+.phraseField input,
+.phraseField textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #d6d3d1;
+  border-radius: 8px;
+  font: inherit;
+  color: #1c1917;
+}
+
+.phraseField textarea {
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .ledgerBtn {

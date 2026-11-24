@@ -5,6 +5,7 @@ import type { OrderListItem } from '../types'
 
 const TABLE = 'orders'
 const PUBLIC_TABLE = 'orders_public'
+const PHRASE_ROW_ID = '__settings_quick_phrases__'
 
 function isMissingApi(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false
@@ -105,6 +106,7 @@ export async function fetchOrdersForDate(dateKey: string): Promise<OrderListItem
       .select('order_data, date_key')
       .eq('date_key', dateKey)
       .neq('id', LEDGER_PASSWORD_ROW_ID)
+      .neq('id', PHRASE_ROW_ID)
       .order('created_at', { ascending: true })
   )
   if (error) {
@@ -131,6 +133,7 @@ export async function fetchOpenOrders(): Promise<{ orders: OrderListItem[]; erro
       .select('order_data, date_key')
       .gte('date_key', daysAgoKey(180))
       .neq('id', LEDGER_PASSWORD_ROW_ID)
+      .neq('id', PHRASE_ROW_ID)
       .order('date_key', { ascending: true })
       .order('created_at', { ascending: true })
   )
@@ -170,6 +173,7 @@ export async function fetchOrdersForMonth(
     .gte('date_key', start)
     .lt('date_key', end)
     .neq('id', LEDGER_PASSWORD_ROW_ID)
+    .neq('id', PHRASE_ROW_ID)
     .order('date_key', { ascending: true })
     .order('created_at', { ascending: true })
   if (error) {
